@@ -20,6 +20,13 @@ A person who still has active bots in a team cannot be removed, and cannot leave
 are archived or deleted. An account that is the only owner of a team with other people cannot be
 deleted until the team has another owner.
 
+## One sidebar
+
+The sidebar lists Personal and each team the person belongs to, one header per workspace, so
+everything is in view without switching first. Opening a chat in another workspace switches to it.
+The list holds only the person's own bots and the groups they host or are in, so nobody sees another
+member's chats here either.
+
 ## Deleting a team
 
 Only the owner can delete a team, and only once nobody else is in it, so the other people have left
