@@ -69,7 +69,7 @@ The API and worker talk to the Kubernetes API with their own service account (or
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `KUBERNETES_SANDBOX_NAMESPACE` | `anviq-sandboxes` | Namespace for computer pods; it must exist |
-| `KUBERNETES_SANDBOX_COMPUTER_IMAGE` | `ghcr.io/leovoss/anviq-agents/computer:edge` | Pin a digest in production |
+| `KUBERNETES_SANDBOX_COMPUTER_IMAGE` | `ghcr.io/anviq-llc/anviq-agents/computer:edge` | Pin a digest in production |
 | `KUBERNETES_SANDBOX_RUNTIME_CLASS_NAME` | unset | For example `kata` or `gvisor` for a VM or user-space kernel boundary |
 | `KUBERNETES_SANDBOX_CPU_LIMIT` / `_MEMORY_LIMIT` | unset | Container limits, such as `2` and `4Gi` |
 | `KUBERNETES_SANDBOX_POD_LABELS` / `_POD_ANNOTATIONS` | unset | JSON objects of strings, merged into every pod |

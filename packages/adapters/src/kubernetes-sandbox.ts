@@ -28,7 +28,7 @@ import { sandboxCommandArgv } from "./sandbox-command-environment.js";
 const DEFAULT_NAMESPACE = "anviq-sandboxes";
 // Same default as the Compose stack. Pin a digest with KUBERNETES_SANDBOX_COMPUTER_IMAGE in
 // production so every pod runs the image the API was tested against.
-const DEFAULT_COMPUTER_IMAGE = "ghcr.io/leovoss/anviq-agents/computer:edge";
+const DEFAULT_COMPUTER_IMAGE = "ghcr.io/anviq-llc/anviq-agents/computer:edge";
 const DEFAULT_READY_TIMEOUT_MS = 120_000;
 const WORKSPACE = "/home/anviq";
 const CONTAINER_NAME = "computer";
