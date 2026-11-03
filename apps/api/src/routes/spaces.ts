@@ -219,25 +219,30 @@ async function memberSpaceNavigation(
 ): Promise<SpaceNavigation> {
   const currentSpace = await deps.prisma.space.findUnique({
     where: { id: actor.spaceId },
-    select: { organizationId: true },
+    select: { organizationId: true, organization: { select: { metadata: true } } },
   });
   if (!currentSpace) throw new IsolationError();
-  // The current organization, the person's teams and their personal space read as one list;
-  // any other organization stays a boundary.
+  const inTeam = currentSpace.organization.metadata?.includes(TEAM_MARK) === true;
+  // The current organization and the person's teams read as one list, and from a team so does
+  // their personal space; any other organization stays a boundary.
   const rows = await deps.prisma.spaceMember.findMany({
     where: {
       userId: actor.userId,
       OR: [
         { organizationId: currentSpace.organizationId },
         { space: { organization: { metadata: { contains: TEAM_MARK } } } },
-        {
-          space: {
-            isDefault: true,
-            organization: {
-              OR: [{ metadata: null }, { NOT: { metadata: { contains: TEAM_MARK } } }],
-            },
-          },
-        },
+        ...(inTeam
+          ? [
+              {
+                space: {
+                  isDefault: true,
+                  organization: {
+                    OR: [{ metadata: null }, { NOT: { metadata: { contains: TEAM_MARK } } }],
+                  },
+                },
+              },
+            ]
+          : []),
       ],
     },
     select: {
