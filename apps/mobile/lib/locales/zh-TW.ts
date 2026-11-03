@@ -1200,6 +1200,8 @@ export const ZH_TW_MESSAGES: Record<string, string> = {
   Invitations: "邀請",
   Invite: "邀請",
   Join: "加入",
+  "Delete team": "刪除團隊",
+  "Delete this team?": "要刪除這個團隊嗎？",
   "Leave team": "退出團隊",
   "Leave this team?": "要退出這個團隊嗎？",
   "Make admin": "設為管理員",

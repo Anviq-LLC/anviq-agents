@@ -1218,6 +1218,8 @@ export const JA_MESSAGES: Record<string, string> = {
   Invitations: "招待",
   Invite: "招待する",
   Join: "参加",
+  "Delete team": "チームを削除",
+  "Delete this team?": "このチームを削除しますか？",
   "Leave team": "チームを退出",
   "Leave this team?": "このチームを退出しますか？",
   "Make admin": "管理者にする",

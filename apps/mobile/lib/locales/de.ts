@@ -1193,6 +1193,8 @@ export const DE_MESSAGES: Record<string, string> = {
   Invitations: "Einladungen",
   Invite: "Einladen",
   Join: "Beitreten",
+  "Delete team": "Team löschen",
+  "Delete this team?": "Dieses Team löschen?",
   "Leave team": "Team verlassen",
   "Leave this team?": "Dieses Team verlassen?",
   "Make admin": "Zum Admin machen",

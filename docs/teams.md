@@ -20,6 +20,13 @@ A person who still has active bots in a team cannot be removed, and cannot leave
 are archived or deleted. An account that is the only owner of a team with other people cannot be
 deleted until the team has another owner.
 
+## Deleting a team
+
+Only the owner can delete a team, and only once nobody else is in it, so the other people have left
+or been removed first. The owner confirms their identity, and the team's spaces, bots, computers, files,
+company memory, invitations and activity log are then removed for good. The owner's personal workspace
+and their other teams are not touched.
+
 Limits: ten teams created per person, fifty pending invitations per team, fifty people in one shared
 chat.
 

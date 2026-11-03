@@ -312,6 +312,8 @@ export const appContract = {
     transferOwnership: oc.input(TeamMemberInput).output(z.object({ ok: z.literal(true) })),
     removeMember: oc.input(TeamMemberInput).output(z.object({ ok: z.literal(true) })),
     leave: oc.input(TeamIdInput).output(z.object({ ok: z.literal(true) })),
+    /** Deletes a team and everything in it. Owner only, once nobody else is in it. */
+    remove: oc.input(TeamIdInput).output(z.object({ ok: z.literal(true) })),
     invitations: oc.input(TeamIdInput).output(z.array(TeamInvitationSchema)),
     invite: oc.input(InviteToTeamInput).output(TeamInvitationSchema),
     cancelInvitation: oc.input(InvitationIdInput).output(z.object({ ok: z.literal(true) })),

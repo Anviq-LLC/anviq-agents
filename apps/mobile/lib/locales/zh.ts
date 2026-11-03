@@ -1180,6 +1180,8 @@ export const ZH_MESSAGES: Record<string, string> = {
   Invitations: "邀请",
   Invite: "邀请",
   Join: "加入",
+  "Delete team": "删除团队",
+  "Delete this team?": "要删除这个团队吗？",
   "Leave team": "退出团队",
   "Leave this team?": "要退出这个团队吗？",
   "Make admin": "设为管理员",

@@ -2430,6 +2430,8 @@ msgstr "{0}を削除"
 
 #. placeholder {0}: bot.name
 #. placeholder {0}: item.name
+#. placeholder {0}: team.name
+#: src/components/TeamSettings.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Delete {0}?"
 msgstr "{0}を削除しますか？"
@@ -2454,6 +2456,10 @@ msgstr "セクションを削除"
 #: src/pages/SpaceSettingsPanel.tsx
 msgid "Delete space"
 msgstr "スペースを削除"
+
+#: src/components/TeamSettings.tsx
+msgid "Delete team"
+msgstr ""
 
 #: src/pages/SpaceSettingOverrides.tsx
 msgid "Delete this Space's credentials?"

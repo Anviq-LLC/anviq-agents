@@ -1185,6 +1185,8 @@ export const NL_MESSAGES: Record<string, string> = {
   Invitations: "Uitnodigingen",
   Invite: "Uitnodigen",
   Join: "Deelnemen",
+  "Delete team": "Team verwijderen",
+  "Delete this team?": "Dit team verwijderen?",
   "Leave team": "Team verlaten",
   "Leave this team?": "Dit team verlaten?",
   "Make admin": "Beheerder maken",
