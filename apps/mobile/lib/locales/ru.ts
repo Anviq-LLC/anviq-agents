@@ -1223,6 +1223,8 @@ export const RU_MESSAGES: Record<string, string> = {
   Invitations: "Приглашения",
   Invite: "Пригласить",
   Join: "Присоединиться",
+  "Delete team": "Удалить команду",
+  "Delete this team?": "Удалить эту команду?",
   "Leave team": "Покинуть команду",
   "Leave this team?": "Покинуть эту команду?",
   "Make admin": "Сделать администратором",

@@ -2430,6 +2430,8 @@ msgstr "Excluir {0}"
 
 #. placeholder {0}: bot.name
 #. placeholder {0}: item.name
+#. placeholder {0}: team.name
+#: src/components/TeamSettings.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Delete {0}?"
 msgstr "Excluir {0}?"
@@ -2453,6 +2455,10 @@ msgstr "Excluir seção"
 #: src/pages/shell/shell-dialogs.tsx
 #: src/pages/SpaceSettingsPanel.tsx
 msgid "Delete space"
+msgstr ""
+
+#: src/components/TeamSettings.tsx
+msgid "Delete team"
 msgstr ""
 
 #: src/pages/SpaceSettingOverrides.tsx
