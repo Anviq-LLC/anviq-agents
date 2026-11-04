@@ -497,7 +497,13 @@ describe("MCP transport seam", () => {
       access_token: "fresh-access",
       refresh_token: "rotated-refresh",
     });
-    expect(persisted).toHaveLength(1);
+    // The SDK may also re-save the unchanged discovery state; the rotation itself is stored once.
+    const rotated = persisted.filter(
+      (material) =>
+        (material as { oauth: { tokens: { refresh_token?: string } } }).oauth.tokens
+          .refresh_token === "rotated-refresh",
+    );
+    expect(rotated).toHaveLength(1);
     await session.close();
   });
 
