@@ -1,4 +1,6 @@
 export const DE_MESSAGES: Record<string, string> = {
+  "Add rule": "Regel hinzufügen",
+  "Tool name": "Tool-Name",
   "Not sent. Tap for options": "Nicht gesendet. Tippen für Optionen",
   "Image input is not configured for this model.":
     "Bildeingabe ist für dieses Modell nicht konfiguriert.",

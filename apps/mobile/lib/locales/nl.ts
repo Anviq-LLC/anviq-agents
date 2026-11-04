@@ -1,4 +1,6 @@
 export const NL_MESSAGES: Record<string, string> = {
+  "Add rule": "Regel toevoegen",
+  "Tool name": "Toolnaam",
   "Not sent. Tap for options": "Niet verzonden. Tik voor opties",
   "Image input is not configured for this model.":
     "Afbeeldingsinvoer is niet ingesteld voor dit model.",
