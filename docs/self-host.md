@@ -1673,8 +1673,14 @@ dump into `/var/backups/anviq`, tags the running app image for rollback, pins `A
 `ANVIQ_COMPUTER_IMAGE_TAG`, pulls, starts with `--wait`, and puts the previous tags back if the
 new ones do not start. A host that keeps only `secrets.enc.yaml` gets its `.env` decrypted with
 `sops` first. Migrations are not reversed by the rollback; they only add tables and columns, so
-the previous images keep working against the migrated database. To update several instances, run
-the script over SSH on each one in turn and stop at the first failure.
+the previous images keep working against the migrated database. Add `--dry-run` to check the tag,
+the Compose file and free disk without changing anything.
+
+To update several instances, keep a list outside the repository (format in
+`infra/compose/fleet.example`, default `~/.config/anviq/fleet`) and run
+`infra/compose/fleet.sh update sha-<commit> [--dry-run]`. It copies the update script to each host,
+runs it, and stops at the first failure. `infra/compose/fleet.sh versions` prints the image tag and
+revision each instance runs.
 
 Source checkouts (not Compose) still upgrade the old way: pull, rebuild with
 `GIT_SHA=$(git rev-parse HEAD)`, run `pnpm db:migrate`, then restart API and worker.
