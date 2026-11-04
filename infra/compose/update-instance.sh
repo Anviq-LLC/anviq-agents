@@ -42,6 +42,15 @@ if (( DRY_RUN )); then
   if [[ -f .env ]]; then
     docker compose --env-file .env "${files[@]}" config --quiet
     echo "Now running: $(sed -n 's/^ANVIQ_IMAGE_TAG=//p' .env | tail -n 1)"
+    # The images this update would pull, from the registry path .env and the compose file resolve to.
+    while read -r image; do
+      [[ "${image}" == *":${TAG}" ]] || continue
+      docker manifest inspect "${image}" >/dev/null 2>&1 || {
+        echo "Cannot reach ${image}; check the image path in .env and the registry login" >&2
+        exit 1
+      }
+      echo "Found ${image}"
+    done < <(ANVIQ_IMAGE_TAG="${TAG}" ANVIQ_COMPUTER_IMAGE_TAG="${TAG}" docker compose --env-file .env "${files[@]}" config --images | sort -u)
   fi
   free_gb="$(df -BG --output=avail . | tail -n 1 | tr -dc '0-9')"
   (( free_gb >= MIN_FREE_GB )) || { echo "Only ${free_gb} GB free; need ${MIN_FREE_GB}" >&2; exit 1; }
