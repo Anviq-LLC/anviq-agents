@@ -12,6 +12,7 @@ import { mcpOAuthEnvReferences } from "@anviq/contracts";
 import type { McpServer as McpServerRow, Prisma } from "@anviq/db";
 import { getLogger } from "@anviq/logging";
 import { ORPCError } from "@orpc/server";
+import { isAdmin } from "./admins.js";
 import { dismissMcpServerApprovals } from "./mcp-approval.js";
 import type { McpSecretMaterial } from "./mcp-material.js";
 import { legacyMcpArgs } from "./mcp-material.js";
@@ -89,10 +90,24 @@ export function mcpStdioPolicy(deps: Pick<RouterDeps, "env">): McpStdioPolicy {
   };
 }
 
-/** Refuse a stdio server this deployment would never run. */
-export function assertMcpStdioCommand(command: string, deps: Pick<RouterDeps, "env">): void {
+/** A stdio server runs with the API's and worker's own access, so only admins add or change one. */
+export async function assertMcpStdioAdmin(
+  actor: Actor,
+  deps: Pick<RouterDeps, "env" | "prisma">,
+): Promise<void> {
+  if (!(await isAdmin(deps, actor.userId)))
+    throw new ORPCError("FORBIDDEN", { message: "Only admins can add local MCP servers" });
+}
+
+/** Refuse a stdio server this deployment would never run, or one a non-admin adds. */
+export async function assertMcpStdioCommand(
+  command: string,
+  actor: Actor,
+  deps: Pick<RouterDeps, "env" | "prisma">,
+): Promise<void> {
   const refusal = mcpStdioRefusal(command, mcpStdioPolicy(deps));
   if (refusal) throw new ORPCError("BAD_REQUEST", { message: refusal });
+  await assertMcpStdioAdmin(actor, deps);
 }
 
 export async function assertMcpRemoteEndpoint(
@@ -273,7 +288,7 @@ export function createMcpServers(
   const prepareMcpServer = async (actor: Actor, input: McpServerConfigInput) => {
     await assertMcpRemoteEndpoint("endpoint" in input ? input.endpoint : null, deps);
     if (input.transport === "stdio") {
-      assertMcpStdioCommand(input.command, deps);
+      await assertMcpStdioCommand(input.command, actor, deps);
       assertMcpOAuthTemplates(input.env, input.files ?? {}, Boolean(input.oauthClient));
       await assertMcpRemoteEndpoint(input.oauthClient?.authorizationServer, deps);
     }

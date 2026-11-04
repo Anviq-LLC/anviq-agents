@@ -883,7 +883,9 @@ refuses to send it anywhere else afterwards. Replacing the client clears the bin
 Stdio MCP servers can use OAuth too. They do not authorize themselves (the MCP spec has them
 read credentials from the environment), so Anviq Agents runs the flow for them. They are off unless
 the API and worker have `MCP_STDIO_ENABLED=true` and the command is listed in
-`MCP_STDIO_ALLOWED_COMMANDS`. When adding the server, enter the OAuth client, its
+`MCP_STDIO_ALLOWED_COMMANDS`. A stdio server runs inside the API and worker with their access, so
+only accounts with a verified email listed in `ANVIQ_ADMIN_EMAILS` can add or change one, and bots
+can add remote servers only. Existing stdio servers keep working. When adding the server, enter the OAuth client, its
 **Authorization server** (the issuer, for example `https://accounts.google.com`) and the
 **Scopes**, then click **Connect OAuth** as for a remote server. Some providers issue a refresh
 token only when asked through extra parameters: for Google, set **Authorization parameters** to

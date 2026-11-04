@@ -29,6 +29,7 @@ import { buildMcpUpdateMaterial, legacyMcpArgs } from "../mcp-material.js";
 import {
   assertMcpOAuthTemplates,
   assertMcpRemoteEndpoint,
+  assertMcpStdioAdmin,
   assertMcpStdioCommand,
   MCP_OAUTH_PENDING_MESSAGE,
   mayUsePrivateEndpoint,
@@ -437,8 +438,10 @@ export function mcpRoutes(ctx: RouterContext) {
               await assertMcpRemoteEndpoint(nextEndpoint, deps);
             }
             if (config.transport === "stdio") {
-              assertMcpStdioCommand(config.command, deps);
+              await assertMcpStdioCommand(config.command, context.actor, deps);
               await assertMcpRemoteEndpoint(config.oauthClient?.authorizationServer, deps);
+            } else if (existing.transport === "stdio") {
+              await assertMcpStdioAdmin(context.actor, deps);
             }
             const endpointChanged = existing.endpoint !== nextEndpoint;
             existingMaterial.args ??= legacyMcpArgs(existing.args);
