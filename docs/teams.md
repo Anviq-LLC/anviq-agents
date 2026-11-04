@@ -56,7 +56,7 @@ in one transcript, and each message shows who wrote it.
   cannot be skipped on its behalf, bot management tools stay off, and the host's own computer is not
   reachable.
 - In a shared chat a bot does not read or write its own notes, its saved memories or its scratchpad, and
-  the person's own memory is not loaded. It still reads company memory, so nothing private from the
+  the person's own memory is not loaded. Its routines and taught skills are not offered either. It still reads company memory, so nothing private from the
   host's other chats appears in front of guests.
 - A group that already has messages cannot be shared until it is cleared, so something said in
   private is never handed to someone who joins later. Everyone keeps their own reading position.
