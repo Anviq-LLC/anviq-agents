@@ -1,5 +1,6 @@
 import type { McpOAuthBroker, McpOAuthSummary, McpStdioPolicy } from "@anviq/adapters";
 import {
+  assertNoMcpEndpointCredential,
   assertSafeRemoteUrl,
   buildMcpCredentialBlob,
   mcpServerHealthDto,
@@ -104,6 +105,7 @@ export async function assertMcpRemoteEndpoint(
     await assertSafeRemoteUrl(endpoint, deps.remoteConnectors?.resolveHostname, {
       allowPrivateEndpoint: mayUsePrivateEndpoint(deps),
     });
+    assertNoMcpEndpointCredential(endpoint);
   } catch (error) {
     throw new ORPCError("BAD_REQUEST", {
       message: error instanceof Error ? error.message : "MCP endpoint is invalid",
