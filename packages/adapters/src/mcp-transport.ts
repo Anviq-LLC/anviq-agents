@@ -15,6 +15,7 @@ import {
   isNpxCommand,
   isPackageRunnerCommand,
 } from "./mcp-package-installer.js";
+import { limitMcpResponseBody } from "./mcp-response-limit.js";
 
 import type { RemoteTransportDependencies, SafeRemoteFetch } from "./remote-mcp.js";
 import { createSafeRemoteFetch, listMcpTools } from "./remote-mcp.js";
@@ -221,7 +222,7 @@ export function secureFetch(
     if (response.status >= 300 && response.status < 400) {
       throw new Error("MCP redirects are not permitted; configure the final HTTPS URL explicitly");
     }
-    return response;
+    return limitMcpResponseBody(response, headers);
   };
   const result = request as SafeRemoteFetch;
   result.close = () => safeRemoteFetch.close();
