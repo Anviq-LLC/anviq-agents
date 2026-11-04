@@ -222,4 +222,16 @@ describe("redaction", () => {
     expect(redacted).toContain('"token":"[Redacted]"');
     expect(redacted).toContain('"authorization":"[Redacted]"');
   });
+
+  it.each([
+    "Authorization: Basic ZmFrZTpmaXh0dXJl",
+    "Authorization: token fixture-credential",
+    "proxy-authorization=Digest fixture-credential",
+    "x-api-key: fixture-credential",
+    "X-API-KEY=fixture-credential",
+  ])("redacts header credentials in free text: %s", (header) => {
+    const redacted = redactSensitiveText(`request failed with ${header} attached`);
+    expect(redacted).toContain("=[Redacted] attached");
+    expect(redacted).not.toMatch(/ZmFrZTpmaXh0dXJl|fixture-credential/);
+  });
 });
