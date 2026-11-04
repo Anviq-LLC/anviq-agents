@@ -62,6 +62,8 @@ export interface AppEnv {
   navLinks?: NavLink[];
   /** Customer name on the settings license notice (ANVIQ_LICENSEE). Unset shows no licensee. */
   licensee?: string;
+  /** Verified accounts that may add stdio MCP servers (ANVIQ_ADMIN_EMAILS), lowercased. */
+  adminEmails: string[];
   phoneCallsEnabled: boolean;
   phoneCallRingSeconds: number;
   phoneCallCooldownMinutes: number;
@@ -237,6 +239,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     userDevicesEnabled: source.USER_DEVICES_ENABLED !== "false",
     navLinks: parseNavLinks(source.ANVIQ_NAV_LINKS),
     licensee: licenseeFromEnv(source.ANVIQ_LICENSEE),
+    adminEmails: list(source.ANVIQ_ADMIN_EMAILS).map((email) => email.toLowerCase()),
     ...phoneCallSettings(source),
     maxUploadSizeBytes: uploadSizeFromEnv(source),
     voiceSummaryMinChars: voiceSummaryMinCharsFromEnv(source.VOICE_SUMMARY_MIN_CHARS),

@@ -1323,7 +1323,11 @@ describe("MCP prepared credential updates", () => {
 });
 
 describe("MCP pre-registered OAuth client", () => {
-  function harness(isDeploymentOwner = true, storedMaterial?: Record<string, unknown>) {
+  function harness(
+    isDeploymentOwner = true,
+    storedMaterial?: Record<string, unknown>,
+    allowedCommands: readonly string[] = ["npx"],
+  ) {
     const values = new Map<string, string>();
     const secretRows = new Map<string, { id: string; ciphertext: string }>();
     let server: Record<string, unknown> | undefined;
@@ -1381,6 +1385,9 @@ describe("MCP pre-registered OAuth client", () => {
           return { count: 1 };
         }),
       },
+      user: {
+        findUnique: vi.fn(async () => ({ email: "owner@anviq.test", emailVerified: true })),
+      },
       deploymentSettings: { findUnique: vi.fn().mockResolvedValue({ ownerUserId: "owner-1" }) },
       $executeRaw: vi.fn(async () => 1),
       $queryRaw: vi.fn(async () => []),
@@ -1405,7 +1412,8 @@ describe("MCP pre-registered OAuth client", () => {
         sandboxProvider: "fake",
         mcpAllowPrivateEndpoint: isDeploymentOwner,
         mcpStdioEnabled: true,
-        mcpStdioAllowedCommands: ["npx"],
+        mcpStdioAllowedCommands: allowedCommands,
+        adminEmails: ["owner@anviq.test"],
       },
       dataDir: "/tmp/anviq-router-test",
     } as unknown as RouterDeps;
@@ -1698,7 +1706,7 @@ describe("MCP pre-registered OAuth client", () => {
           expect(secrets.put).not.toHaveBeenCalled();
         });
 
-        it("drops the files when the credential is cleared", async () => {
+        it("drops the files but keeps the arguments when the credential is cleared", async () => {
           const { client, material, server } = harness(true, storedWithFile);
 
           const updated = await client.mcp.servers.update({
@@ -1708,6 +1716,23 @@ describe("MCP pre-registered OAuth client", () => {
 
           expect(updated.fileKeys).toEqual([]);
           expect(server()?.files).toEqual({});
+          expect(material()).toEqual({ args: stdio.args });
+        });
+
+        it("drops the secret when the credential is cleared from a server without arguments", async () => {
+          const { client, material, server } = harness(true, storedWithFile);
+
+          await client.mcp.servers.update({
+            ...base,
+            config: {
+              ...base.config,
+              command: "npx",
+              args: [],
+              oauthClient: null,
+              clearCredential: true,
+            },
+          });
+
           expect(server()?.secretId).toBeNull();
           expect(material).toThrow();
         });
@@ -1795,7 +1820,7 @@ describe("MCP pre-registered OAuth client", () => {
         const updated = await client.mcp.servers.update(update);
 
         expect(updated.oauthClientId).toBe("client-1.apps.example.test");
-        expect(material()).toEqual(stored);
+        expect(material()).toEqual({ ...stored, args: stdio.args });
       });
 
       it("clears the grant when the update changes the scope", async () => {
@@ -1820,6 +1845,43 @@ describe("MCP pre-registered OAuth client", () => {
           scope: "drive",
           authorization_server: "https://accounts.example.test/",
         });
+      });
+
+      it("clears the stored credential when the command changes and none is sent", async () => {
+        const { client, server, secrets, prisma } = harness(
+          true,
+          { args: [...stdio.args, "--token", "stored-token"] },
+          ["npx", "node"],
+        );
+
+        const updated = await client.mcp.servers.update({
+          ...update,
+          config: { ...stdio, command: "node", args: [], env: {}, enabled: true, description: "" },
+        });
+
+        expect(updated.hasSecret).toBe(false);
+        expect(updated.hasArgs).toBe(false);
+        expect(server()?.secretId).toBeNull();
+        expect(secrets.put).not.toHaveBeenCalled();
+        expect(prisma.secret.deleteMany).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ id: "secret-0" }) }),
+        );
+      });
+
+      it("deletes a stored credential that holds only an empty env record", async () => {
+        const { client, server, secrets, prisma } = harness(true, { env: {} });
+
+        const updated = await client.mcp.servers.update({
+          ...update,
+          config: { ...stdio, args: [], env: {}, enabled: true, description: "" },
+        });
+
+        expect(updated.hasSecret).toBe(false);
+        expect(server()?.secretId).toBeNull();
+        expect(secrets.put).not.toHaveBeenCalled();
+        expect(prisma.secret.deleteMany).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ id: "secret-0" }) }),
+        );
       });
     });
 
@@ -2012,6 +2074,10 @@ describe("MCP server health", () => {
         updateMany,
       },
       secret: { findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
+      user: {
+        findUnique: vi.fn(async () => ({ email: "owner@anviq.test", emailVerified: true })),
+        findUniqueOrThrow: vi.fn(async () => ({ email: "owner@anviq.test", name: "Owner" })),
+      },
       deploymentSettings: { findUnique: vi.fn().mockResolvedValue({ ownerUserId: "owner-1" }) },
       $executeRaw: vi.fn(async () => 1),
       $queryRaw: vi.fn(async () => []),
@@ -2032,6 +2098,7 @@ describe("MCP server health", () => {
         sandboxProvider: "fake",
         mcpStdioEnabled: true,
         mcpStdioAllowedCommands: ["npx"],
+        adminEmails: ["owner@anviq.test"],
       },
       dataDir: "/tmp/anviq-router-test",
     } as unknown as RouterDeps;
@@ -2103,12 +2170,49 @@ describe("MCP server health", () => {
 
   it("reports stdio support with the account", async () => {
     const h = harness();
-    (h.deps.prisma as unknown as Record<string, unknown>).user = {
-      findUniqueOrThrow: vi.fn(async () => ({ email: "owner@anviq.test", name: "Owner" })),
-    };
     expect((await h.client.me()).mcpStdioEnabled).toBe(true);
     Object.assign(h.deps.env, { mcpStdioEnabled: false });
     expect((await h.client.me()).mcpStdioEnabled).toBe(false);
+  });
+
+  it("lets only admins add or change stdio servers", async () => {
+    const h = harness();
+    Object.assign(h.deps.env, { adminEmails: ["someone-else@anviq.test"] });
+    const refusal = { code: "FORBIDDEN", message: "Only admins can add local MCP servers" };
+
+    expect((await h.client.me()).mcpStdioEnabled).toBe(false);
+    await expect(h.client.mcp.servers.create(stdioInput)).rejects.toMatchObject(refusal);
+    await expect(
+      h.client.mcp.servers.update({
+        id: "server-1",
+        config: { ...stdioInput, enabled: true, description: "", env: {} },
+      }),
+    ).rejects.toMatchObject(refusal);
+    await expect(
+      h.client.mcp.servers.update({
+        id: "server-1",
+        config: {
+          transport: "streamable_http",
+          slug: "gmail",
+          name: "Gmail",
+          description: "",
+          enabled: true,
+          endpoint: "https://mcp.example.test/mcp",
+          headers: {},
+        },
+      }),
+    ).rejects.toMatchObject(refusal);
+    expect(h.deps.prisma.mcpServer.create).not.toHaveBeenCalled();
+    expect(h.deps.prisma.mcpServer.update).not.toHaveBeenCalled();
+
+    await expect(
+      h.client.mcp.servers.create({
+        transport: "streamable_http",
+        slug: "remote",
+        name: "Remote",
+        endpoint: "https://mcp.example.test/mcp",
+      }),
+    ).resolves.toMatchObject({ transport: "streamable_http" });
   });
 
   it("lists servers with their health", async () => {
@@ -2314,6 +2418,59 @@ describe("MCP server health", () => {
 
       expect(created.health.status).toBe("unknown");
       expect(h.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("keeps stdio arguments in the encrypted credential, never in the row or the response", async () => {
+      const h = harness({ row: null });
+      const put = vi.mocked(h.deps.secrets.put).mockResolvedValue({
+        id: "secret-1",
+        ciphertext: "v2:fake",
+      } as never);
+
+      const created = await h.client.mcp.servers.create({
+        ...stdioInput,
+        args: ["--api-key", "fake-key"],
+      });
+
+      expect(JSON.parse(String(put.mock.calls[0]?.[0]))).toMatchObject({
+        args: ["--api-key", "fake-key"],
+      });
+      const data = vi.mocked(h.deps.prisma.mcpServer.create).mock.calls[0]?.[0].data;
+      expect(data).not.toHaveProperty("args");
+      expect(data).toMatchObject({ hasArgs: true, secretId: "secret-1" });
+      expect(created).not.toHaveProperty("args");
+      expect(created.hasArgs).toBe(true);
+    });
+
+    it("moves a server's plaintext arguments into its credential when it is saved", async () => {
+      const h = harness({ row: baseRow({ args: ["--api-key", "fake-key"] }) });
+      const put = vi.mocked(h.deps.secrets.put).mockResolvedValue({
+        id: "secret-1",
+        ciphertext: "v2:fake",
+      } as never);
+
+      const updated = await h.client.mcp.servers.update({
+        id: "server-1",
+        config: { ...stdioInput, args: [] },
+      });
+
+      expect(JSON.parse(String(put.mock.calls[0]?.[0]))).toMatchObject({
+        args: ["--api-key", "fake-key"],
+      });
+      expect(h.row()).toMatchObject({ args: [], hasArgs: true, secretId: "secret-1" });
+      expect(updated.hasArgs).toBe(true);
+    });
+
+    it("still reports arguments a server kept in plaintext", async () => {
+      const h = harness();
+      (h.deps.prisma.mcpServer as unknown as { findMany: unknown }).findMany = vi.fn(async () => [
+        h.row(),
+      ]);
+
+      const [listed] = await h.client.mcp.servers.list();
+
+      expect(listed).not.toHaveProperty("args");
+      expect(listed?.hasArgs).toBe(true);
     });
 
     it("probes the server once its OAuth session completes", async () => {

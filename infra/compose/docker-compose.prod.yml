@@ -390,6 +390,7 @@ services:
       ANVIQ_MIN_CLIENT_BUILD:
       ANVIQ_NAV_LINKS:
       ANVIQ_LICENSEE:
+      ANVIQ_ADMIN_EMAILS:
       VOICE_SUMMARY_MIN_CHARS:
     expose:
       - "3100"
