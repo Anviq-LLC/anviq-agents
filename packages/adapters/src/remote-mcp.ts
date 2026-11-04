@@ -19,6 +19,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { Agent } from "undici";
 import { sensitiveQueryParameter } from "./connector-http.js";
 import { combineSignals } from "./connector-safety.js";
+import { limitMcpResponseBody } from "./mcp-response-limit.js";
 import type { ResolvedAddress, ResolveHostname } from "./network-address.js";
 import {
   createAddressCheckedLookup,
@@ -135,7 +136,7 @@ async function withRemoteMcpClient<T>(
       redirect: "manual",
       signal,
     },
-    fetch: safeFetch,
+    fetch: async (input, init) => limitMcpResponseBody(await safeFetch(input, init), init?.headers),
   });
   const client = new Client({ name: "anviq", version: "0.1.0" }, { capabilities: {} });
   try {
