@@ -3,15 +3,20 @@
 # to the previous images when the new ones do not start.
 #
 # Run from the instance directory (default /opt/anviq), the one with docker-compose.images.yml:
-#   ./update-instance.sh sha-<commit>
+#   ./update-instance.sh sha-<commit> [--dry-run]
+#
+# --dry-run checks the tag, the Compose file and free disk, prints what would change, and stops
+# before touching .env, the database or the running containers.
 #
 # Migrations are not reversed by a rollback. They only add tables and columns, so the previous
 # images keep working against the migrated database; the backup is for anything else.
 set -Eeuo pipefail
 
 TAG="${1:-}"
+DRY_RUN=0
+[[ "${2:-}" == --dry-run ]] && DRY_RUN=1
 [[ "${TAG}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || {
-  echo "Usage: $0 <image tag, for example sha-1a2b3c4 or edge>" >&2
+  echo "Usage: $0 <image tag, for example sha-1a2b3c4 or edge> [--dry-run]" >&2
   exit 1
 }
 
@@ -24,12 +29,25 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 files=(-f docker-compose.images.yml)
 [[ -f docker-compose.traefik.yml ]] && files+=(-f docker-compose.traefik.yml)
 compose() { docker compose --env-file .env "${files[@]}" "$@"; }
+trap 'echo "Failed at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
 set_env() {
   local key="$1" value="$2"
   sed -i "/^${key}=/d" .env
   printf '%s=%s\n' "${key}" "${value}" >>.env
 }
+
+if (( DRY_RUN )); then
+  [[ -f .env || -f secrets.enc.yaml ]] || { echo "No .env and no secrets.enc.yaml in $(pwd)" >&2; exit 1; }
+  if [[ -f .env ]]; then
+    docker compose --env-file .env "${files[@]}" config --quiet
+    echo "Now running: $(sed -n 's/^ANVIQ_IMAGE_TAG=//p' .env | tail -n 1)"
+  fi
+  free_gb="$(df -BG --output=avail . | tail -n 1 | tr -dc '0-9')"
+  (( free_gb >= MIN_FREE_GB )) || { echo "Only ${free_gb} GB free; need ${MIN_FREE_GB}" >&2; exit 1; }
+  echo "Dry run ok: would update to ${TAG} with ${free_gb} GB free"
+  exit 0
+fi
 
 # .env is the decrypted secrets file; a host that keeps only the encrypted copy gets it rebuilt.
 if [[ ! -f .env ]]; then
@@ -73,7 +91,7 @@ rollback() {
 
 set_env ANVIQ_IMAGE_TAG "${TAG}"
 set_env ANVIQ_COMPUTER_IMAGE_TAG "${TAG}"
-trap rollback ERR
+trap 'echo "Failed at line ${LINENO}: ${BASH_COMMAND}" >&2; rollback' ERR
 compose pull --quiet
 timeout "${UP_TIMEOUT}" docker compose --env-file .env "${files[@]}" up -d --wait --pull never
 trap - ERR
