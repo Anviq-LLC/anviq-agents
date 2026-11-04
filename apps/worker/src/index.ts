@@ -3,6 +3,7 @@ import type { JobPublisher, JobWorkerHost } from "@anviq/adapter-kit";
 import { ComposioConnector, IntegrationProviderSettings } from "@anviq/adapters";
 import { phoneCallSettings } from "@anviq/core";
 import { loadRootEnv } from "@anviq/core/node/load-root-env";
+import { stopOnShutdownSignals } from "@anviq/core/node/shutdown-signals";
 import { startWorkerHealth } from "./health.js";
 import { createWorkerSecretStore } from "./secret-store.js";
 
@@ -377,8 +378,7 @@ async function main() {
       await logger.flush({ timeoutMs: 2_000 });
     }
   };
-  process.once("SIGTERM", () => void stop());
-  process.once("SIGINT", () => void stop());
+  stopOnShutdownSignals(stop);
   // graphile-worker fires completeJob() without awaiting it. When pool.connect()
   // then hits Postgres 53300, that rejection is unhandled. Exiting here is the
   // crash loop: Docker restarts the process before Postgres has reaped the old
