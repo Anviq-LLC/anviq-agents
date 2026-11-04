@@ -46,6 +46,8 @@ type OAuthState = {
 
 export type OAuthMaterial = {
   secret?: string;
+  /** Stdio launch arguments. */
+  args?: string[];
   env?: Record<string, string>;
   /** Credential files for a stdio server: the env variable that receives the file's
    * path, and the content template, which may use `{{oauth.*}}` references. */
@@ -1458,6 +1460,7 @@ export class McpOAuthBroker {
       }
       const hasMaterial = Boolean(
         nextMaterial.secret ||
+          nextMaterial.args?.length ||
           Object.keys(nextMaterial.env ?? {}).length ||
           Object.keys(nextMaterial.files ?? {}).length ||
           Object.keys(nextMaterial.headers ?? {}).length ||
