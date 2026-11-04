@@ -1,4 +1,5 @@
 export const NL_MESSAGES: Record<string, string> = {
+  "Schedule delayed": "Geplande uitvoering vertraagd",
   "Not sent. Tap for options": "Niet verzonden. Tik voor opties",
   "Image input is not configured for this model.":
     "Afbeeldingsinvoer is niet ingesteld voor dit model.",

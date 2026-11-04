@@ -1,4 +1,5 @@
 export const RU_MESSAGES: Record<string, string> = {
+  "Schedule delayed": "Запуск по расписанию задерживается",
   "Not sent. Tap for options": "Не отправлено. Нажмите для выбора действий",
   "Image input is not configured for this model.": "Ввод изображений не настроен для этой модели.",
   "Send as file": "Отправить как файл",

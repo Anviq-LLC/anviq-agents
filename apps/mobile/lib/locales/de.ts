@@ -1,4 +1,5 @@
 export const DE_MESSAGES: Record<string, string> = {
+  "Schedule delayed": "Ausführung verzögert",
   "Not sent. Tap for options": "Nicht gesendet. Tippen für Optionen",
   "Image input is not configured for this model.":
     "Bildeingabe ist für dieses Modell nicht konfiguriert.",

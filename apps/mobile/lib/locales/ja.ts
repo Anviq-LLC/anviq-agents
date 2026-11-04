@@ -1,4 +1,5 @@
 export const JA_MESSAGES: Record<string, string> = {
+  "Schedule delayed": "予定の実行が遅れています",
   "Not sent. Tap for options": "未送信。タップしてオプションを表示",
   "Image input is not configured for this model.": "このモデルでは画像入力が設定されていません。",
   "Send as file": "ファイルとして送信",
