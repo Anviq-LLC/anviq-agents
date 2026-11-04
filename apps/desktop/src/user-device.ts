@@ -9,6 +9,7 @@ import type {
   UserDevicePairResponse,
 } from "@anviq/contracts";
 import { USER_DEVICE_PAIR_PATH, USER_DEVICE_PATH } from "@anviq/contracts";
+import { secureHttpOrigin } from "@anviq/contracts/network-host";
 import { readPrivateFile, writePrivateFile } from "./setup-store.js";
 
 export interface DeviceTokenCipher {
@@ -272,6 +273,7 @@ export function createUserDeviceAccess(deps: {
   return {
     /** Switches to a server origin (or none), connecting or pairing unless this computer declined it. */
     async select(origin: string | null) {
+      origin = secureHttpOrigin(origin ?? undefined);
       if (origin === current) return;
       const selection = ++generation;
       disconnect();
