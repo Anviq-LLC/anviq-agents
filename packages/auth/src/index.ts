@@ -423,7 +423,7 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
               internalAdapter: {
                 ...ctx.context.internalAdapter,
                 // Better Auth drops an unverified account's logins and sessions when a
-                // code proves the mailbox; credentials Rakazo stores elsewhere go too.
+                // code proves the mailbox; credentials Anviq Agents stores elsewhere go too.
                 ...(ctx.path === CODE_SIGN_IN_PATH
                   ? {
                       updateUser: async (...args: Parameters<typeof updateUser>) => {

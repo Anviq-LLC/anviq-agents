@@ -294,7 +294,7 @@ function stdioParams(options: McpStdioOptions): StdioServerParameters {
     throw new Error("MCP stdio bin was not installed by Anviq Agents");
   }
   if (options.installedBin === undefined && isNpxCommand(options.command)) {
-    throw new Error("npx only launches a package bin Rakazo installed");
+    throw new Error("npx only launches a package bin Anviq Agents installed");
   }
   const command = options.installedBin?.binPath ?? options.command.trim();
   const env: Record<string, string> = {};
