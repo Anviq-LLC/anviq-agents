@@ -17,6 +17,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { Agent } from "undici";
+import { sensitiveQueryParameter } from "./connector-http.js";
 import { combineSignals } from "./connector-safety.js";
 import type { ResolvedAddress, ResolveHostname } from "./network-address.js";
 import {
@@ -144,6 +145,12 @@ async function withRemoteMcpClient<T>(
     await client.close().catch(() => undefined);
     await safeFetch.close().catch(() => undefined);
   }
+}
+
+/** A saved MCP endpoint is stored and shown in plaintext, so its credentials belong in headers. */
+export function assertNoMcpEndpointCredential(endpoint: string): void {
+  const name = sensitiveQueryParameter(new URL(endpoint));
+  if (name) throw new Error(`Put ${name} in a header instead of the server URL`);
 }
 
 export async function assertSafeRemoteUrl(
