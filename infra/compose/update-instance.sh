@@ -8,6 +8,10 @@
 # --dry-run checks the tag, the Compose file and free disk, prints what would change, and stops
 # before touching .env, the database or the running containers.
 #
+# ANVIQ_COMPOSE_FILE names a docker-compose.images.yml that matches the tag (fleet.sh sends one). It
+# is checked first and replaces the instance's copy only once the update starts; the old copy is
+# kept next to it and restored if the update rolls back.
+#
 # Migrations are not reversed by a rollback. They only add tables and columns, so the previous
 # images keep working against the migrated database; the backup is for anything else.
 set -Eeuo pipefail
@@ -26,7 +30,15 @@ MIN_FREE_GB="${ANVIQ_MIN_FREE_GB:-5}"
 UP_TIMEOUT="${ANVIQ_UP_TIMEOUT:-10m}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
-files=(-f docker-compose.images.yml)
+COMPOSE_BASE=docker-compose.images.yml
+trap 'rm -f "${COMPOSE_BASE}.next"' EXIT
+new_compose="${ANVIQ_COMPOSE_FILE:-}"
+if [[ -n "${new_compose}" ]]; then
+  [[ -f "${new_compose}" ]] || { echo "No Compose file at ${new_compose}" >&2; exit 1; }
+  cmp -s "${new_compose}" "${COMPOSE_BASE}" || { cp "${new_compose}" "${COMPOSE_BASE}.next"; new_compose="${COMPOSE_BASE}.next"; }
+  [[ "${new_compose}" == "${COMPOSE_BASE}.next" ]] || new_compose=""
+fi
+files=(-f "${new_compose:-${COMPOSE_BASE}}")
 [[ -f docker-compose.traefik.yml ]] && files+=(-f docker-compose.traefik.yml)
 compose() { docker compose --env-file .env "${files[@]}" "$@"; }
 trap 'echo "Failed at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
@@ -54,6 +66,7 @@ if (( DRY_RUN )); then
   fi
   free_gb="$(df -BG --output=avail . | tail -n 1 | tr -dc '0-9')"
   (( free_gb >= MIN_FREE_GB )) || { echo "Only ${free_gb} GB free; need ${MIN_FREE_GB}" >&2; exit 1; }
+  [[ -z "${new_compose}" ]] || echo "Would replace ${COMPOSE_BASE} with the one for ${TAG}"
   echo "Dry run ok: would update to ${TAG} with ${free_gb} GB free"
   exit 0
 fi
@@ -87,8 +100,18 @@ else
 fi
 [[ -n "${previous_image}" ]] && docker tag "${previous_image}" "anviq-app:rollback-${STAMP}"
 
+saved_compose=""
+if [[ -n "${new_compose}" ]]; then
+  saved_compose="${COMPOSE_BASE}.pre-update-${STAMP}"
+  cp -p "${COMPOSE_BASE}" "${saved_compose}"
+  mv "${new_compose}" "${COMPOSE_BASE}"
+  files=(-f "${COMPOSE_BASE}")
+  [[ -f docker-compose.traefik.yml ]] && files+=(-f docker-compose.traefik.yml)
+fi
+
 rollback() {
   echo "Update failed; going back to ${previous_tag:-the previous images}" >&2
+  [[ -z "${saved_compose}" ]] || cp -p "${saved_compose}" "${COMPOSE_BASE}"
   if [[ -n "${previous_tag}" ]]; then
     set_env ANVIQ_IMAGE_TAG "${previous_tag}"
     set_env ANVIQ_COMPUTER_IMAGE_TAG "${previous_computer_tag:-${previous_tag}}"

@@ -31,11 +31,27 @@ each() {
   echo "Done: ${done} of ${total}"
 }
 
+# The Compose file that ships with a release: the one at the commit a sha-<commit> tag names, or
+# this checkout's copy for any other tag.
+compose_for() {
+  local tag="$1" out="$2"
+  if [[ "${tag}" =~ ^sha-([0-9a-f]{7,40})$ ]]; then
+    git -C "${here}" show "${BASH_REMATCH[1]}:infra/compose/docker-compose.images.yml" >"${out}" 2>/dev/null ||
+      { echo "Commit ${BASH_REMATCH[1]} is not in this checkout; run git fetch" >&2; return 1; }
+  else
+    cp "${here}/docker-compose.images.yml" "${out}"
+  fi
+}
+
 update() {
-  local target="$1" dir="$2" tag="$3" flag="$4" remote
+  local target="$1" dir="$2" tag="$3" flag="$4" remote compose
   remote="/tmp/anviq-update-instance.$$"
+  compose="$(mktemp)"
+  compose_for "${tag}" "${compose}" || { rm -f "${compose}"; return 1; }
   scp -q "${here}/update-instance.sh" "${target}:${remote}"
-  ssh -n "${target}" "ANVIQ_DIR=$(printf %q "${dir}") bash ${remote} ${tag} ${flag}; code=\$?; rm -f ${remote}; exit \$code"
+  scp -q "${compose}" "${target}:${remote}.yml"
+  rm -f "${compose}"
+  ssh -n "${target}" "ANVIQ_DIR=$(printf %q "${dir}") ANVIQ_COMPOSE_FILE=${remote}.yml bash ${remote} ${tag} ${flag}; code=\$?; rm -f ${remote} ${remote}.yml; exit \$code"
 }
 
 version() {
