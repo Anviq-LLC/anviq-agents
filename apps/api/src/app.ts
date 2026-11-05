@@ -30,7 +30,6 @@ import {
   applyMessagingOutboundStatus,
   ChatSdkMessagingSurface,
   CodexCatalogCache,
-  ComposioConnector,
   contentKeyProviderFromEnv,
   createAgentHomeStore,
   createArtifactStore,
@@ -60,7 +59,6 @@ import {
   InstalledConnectorProvider,
   IntegrationProviderSettings,
   installedMessaging,
-  isComposioEnabled,
   isMessagingSurfaceEnabled,
   isPipedreamEnabled,
   McpConnector,
@@ -459,11 +457,7 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
     env.mcpAllowPrivateEndpoint,
   );
   const integrationSettings = new IntegrationProviderSettings(prisma, secrets, env.encryptionKey, {
-    composio:
-      composioOverride ??
-      (isComposioEnabled(env.composioApiKey)
-        ? new ComposioConnector({ apiKey: env.composioApiKey })
-        : undefined),
+    composio: composioOverride,
     pipedream,
   });
   const stack = createConnectorStack(composioOverride, [
@@ -621,7 +615,7 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
     connector: stack.connector,
     connectors: stack.connector,
     listConnectedPluginSlugs: async (userId) => {
-      const provider = await integrationSettings.resolve("composio");
+      const provider = await integrationSettings.resolve("composio", userId);
       if (!provider) return [];
       return provider.listConnectedExternalIds({
         userId,
@@ -633,7 +627,6 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
     },
     secrets: [
       env.deploymentModelKey ?? "",
-      env.composioApiKey ?? "",
       env.cursorApiKey ?? "",
       process.env.TYPESAFE_API_KEY ?? "",
     ].filter(Boolean),

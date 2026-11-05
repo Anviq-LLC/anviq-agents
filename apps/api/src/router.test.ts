@@ -1250,6 +1250,7 @@ describe("MCP prepared credential updates", () => {
       botSecret: { count: async () => 0 },
       vaultCredential: { count: async () => 0 },
       integrationProviderConfig: { count: async () => 0 },
+      userIntegrationProviderConfig: { count: async () => 0 },
       $executeRaw: async () => 1,
       $queryRaw: async () => [],
       async $transaction(callback: (tx: typeof prisma) => Promise<unknown>) {
@@ -2801,7 +2802,7 @@ describe("connections.complete", () => {
           userId: "user-1",
           signal: new AbortController().signal,
         },
-        { recordId: "integration-provider:composio" },
+        { recordId: "integration-provider:composio:user-1" },
       );
       let ref = stored.ref;
       let inTransaction = false;
@@ -2822,8 +2823,8 @@ describe("connections.complete", () => {
         createdAt: new Date(0),
       };
       const client = {
-        integrationProviderConfig: {
-          findUnique: vi.fn(async () => ({ id: "composio", ciphertext: ref })),
+        userIntegrationProviderConfig: {
+          findUnique: vi.fn(async () => ({ ciphertext: ref })),
         },
         connection: {
           findFirst: vi.fn(async () => row),
@@ -3865,74 +3866,121 @@ describe("computer terminal and file transfer", () => {
   });
 });
 
-describe("integration setup authorization", () => {
-  it.each([
-    { owner: false, configured: false, needsSetup: false },
-    { owner: true, configured: false, needsSetup: false },
-    { owner: true, configured: true, needsSetup: false },
-  ])(
-    "never offers server setup to an app account: %j",
-    async ({ owner, configured, needsSetup }) => {
-      const lookup = vi.fn(async () => configured);
-      const deps = {
-        prisma: {},
-        env: { webOrigin: "https://example.test" },
-        integrationSettings: { configured: lookup },
-      } as unknown as RouterDeps;
-      const handler = new RPCHandler(createRouter(deps));
-      const { response } = await handler.handle(
-        new Request("https://example.test/rpc/integrationSetup/get", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ json: null }),
-        }),
-        {
-          prefix: "/rpc",
-          context: {
-            actor: {
-              userId: "user",
-              spaceId: "space",
-              email: "user@anviq.test",
-              isDeploymentOwner: owner,
-            },
-          },
-        },
-      );
-      const result = (await response.json()).json;
-      expect(result).toMatchObject({ canConfigure: false, needsSetup });
-      expect(result.providers).toEqual([]);
-      expect(lookup).not.toHaveBeenCalled();
-    },
-  );
-
-  it("rejects provider credentials from a non-owner before verification or persistence", async () => {
-    const save = vi.fn();
-    const deps = {
-      prisma: {},
-      env: { webOrigin: "https://example.test" },
-      integrationSettings: { save },
-    } as unknown as RouterDeps;
-    const handler = new RPCHandler(createRouter(deps));
+describe("integration setup", () => {
+  const admin = { id: "user", email: "boss@anviq.test", emailVerified: true };
+  const call = async (
+    procedure: "get" | "save",
+    deps: Record<string, unknown>,
+    body: unknown = null,
+  ) => {
+    const handler = new RPCHandler(createRouter(deps as unknown as RouterDeps));
     const { response } = await handler.handle(
-      new Request("https://example.test/rpc/integrationSetup/save", {
+      new Request(`https://example.test/rpc/integrationSetup/${procedure}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ json: { provider: "composio", apiKey: "fake-key" } }),
+        body: JSON.stringify({ json: body }),
       }),
       {
         prefix: "/rpc",
         context: {
           actor: {
-            userId: "member",
+            userId: "user",
             spaceId: "space",
-            email: "member@anviq.test",
+            email: "user@anviq.test",
             isDeploymentOwner: false,
           },
         },
       },
     );
-    expect(response.status).toBe(403);
+    return response;
+  };
+  const baseDeps = (user: typeof admin | null, extra: Record<string, unknown> = {}) => ({
+    prisma: { user: { findUnique: vi.fn(async () => user) } },
+    env: { webOrigin: "https://example.test", adminEmails: ["boss@anviq.test"] },
+    ...extra,
+  });
+  const member = { ...admin, email: "member@anviq.test" };
+
+  it("reports whether the signed-in user has a key, looked up for that user only", async () => {
+    const lookup = vi.fn(
+      async (id: string, userId?: string) => id === "composio" && userId === "user",
+    );
+    const response = await call(
+      "get",
+      baseDeps(member, { integrationSettings: { configured: lookup } }),
+    );
+    const result = (await response.json()).json;
+    expect(result).toMatchObject({ canConfigure: true, needsSetup: false });
+    expect(result.providers).toEqual([
+      { id: "composio", configured: true },
+      { id: "pipedream", configured: false },
+    ]);
+    expect(lookup).toHaveBeenCalledWith("composio", "user");
+  });
+
+  it("needs setup when the user has no key", async () => {
+    const response = await call(
+      "get",
+      baseDeps(member, { integrationSettings: { configured: vi.fn(async () => false) } }),
+    );
+    expect((await response.json()).json).toMatchObject({ canConfigure: true, needsSetup: true });
+  });
+
+  it("saves a member's Composio key under their own user", async () => {
+    const save = vi.fn(async () => undefined);
+    const response = await call("save", baseDeps(member, { integrationSettings: { save } }), {
+      provider: "composio",
+      apiKey: "fake-key",
+    });
+    expect(response.status).toBe(200);
+    expect(save).toHaveBeenCalledWith(
+      { provider: "composio", apiKey: "fake-key" },
+      expect.objectContaining({ userId: "user", spaceId: "space" }),
+    );
+  });
+
+  const pipedream = {
+    provider: "pipedream",
+    clientId: "client",
+    clientSecret: "fake-secret",
+    projectId: "project",
+  };
+
+  it("keeps deployment-wide providers to administrators", async () => {
+    const save = vi.fn(async () => undefined);
+    const denied = await call(
+      "save",
+      baseDeps(member, { integrationSettings: { save } }),
+      pipedream,
+    );
+    expect(denied.status).toBe(403);
     expect(save).not.toHaveBeenCalled();
+    const unverified = await call(
+      "save",
+      baseDeps({ ...admin, emailVerified: false }, { integrationSettings: { save } }),
+      pipedream,
+    );
+    expect(unverified.status).toBe(403);
+    expect(save).not.toHaveBeenCalled();
+    const allowed = await call(
+      "save",
+      baseDeps(admin, { integrationSettings: { save } }),
+      pipedream,
+    );
+    expect(allowed.status).toBe(200);
+    expect(save).toHaveBeenCalledOnce();
+  });
+
+  it("does not echo provider errors that could contain credentials", async () => {
+    const save = vi.fn(async () => {
+      throw new Error("bad key fake-key");
+    });
+    const response = await call("save", baseDeps(member, { integrationSettings: { save } }), {
+      provider: "composio",
+      apiKey: "fake-key",
+    });
+    expect(response.status).toBe(400);
+    expect(JSON.stringify(await response.json())).not.toContain("fake-key");
   });
 });
 
@@ -3965,7 +4013,13 @@ describe("server operation authorization", () => {
         () => client.updater.check({}),
         () => client.updater.apply({}),
         () => client.computer.releaseInterrupted({ id: "update-1", workersStopped: true }),
-        () => client.integrationSetup.save({ provider: "composio", apiKey: "fake-key" }),
+        () =>
+          client.integrationSetup.save({
+            provider: "pipedream",
+            clientId: "client",
+            clientSecret: "fake-secret",
+            projectId: "project",
+          }),
       ])
         await expect(call()).rejects.toMatchObject({ code: "FORBIDDEN" });
       expect(prisma.deploymentSettings.update).not.toHaveBeenCalled();
