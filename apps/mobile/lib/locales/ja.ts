@@ -1,4 +1,5 @@
 export const JA_MESSAGES: Record<string, string> = {
+  "Schedule delayed": "予定の実行が遅れています",
   "Add rule": "ルールを追加",
   "Tool name": "ツール名",
   "Not sent. Tap for options": "未送信。タップしてオプションを表示",

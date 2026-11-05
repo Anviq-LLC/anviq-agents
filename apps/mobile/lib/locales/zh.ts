@@ -1,4 +1,5 @@
 export const ZH_MESSAGES: Record<string, string> = {
+  "Schedule delayed": "计划执行延迟",
   "Add rule": "添加规则",
   "Tool name": "工具名称",
   "Not sent. Tap for options": "未发送。轻点查看选项",
