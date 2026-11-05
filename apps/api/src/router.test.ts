@@ -3865,7 +3865,7 @@ describe("computer terminal and file transfer", () => {
   });
 });
 
-describe("integration setup authorization", () => {
+describe("integration setup", () => {
   const admin = { id: "user", email: "boss@anviq.test", emailVerified: true };
   const call = async (
     procedure: "get" | "save",
@@ -3898,58 +3898,36 @@ describe("integration setup authorization", () => {
     env: { webOrigin: "https://example.test", adminEmails: ["boss@anviq.test"] },
     ...extra,
   });
+  const member = { ...admin, email: "member@anviq.test" };
 
-  it.each([
-    { name: "a member", user: { ...admin, email: "member@anviq.test" } },
-    { name: "an unverified admin email", user: { ...admin, emailVerified: false } },
-  ])("never offers server setup to $name", async ({ user }) => {
-    const lookup = vi.fn(async () => true);
-    const response = await call(
-      "get",
-      baseDeps(user, { integrationSettings: { configured: lookup } }),
+  it("reports whether the signed-in user has a key, looked up for that user only", async () => {
+    const lookup = vi.fn(
+      async (id: string, userId?: string) => id === "composio" && userId === "user",
     );
-    const result = (await response.json()).json;
-    expect(result).toMatchObject({ canConfigure: false, needsSetup: false });
-    expect(result.providers).toEqual([]);
-    expect(lookup).not.toHaveBeenCalled();
-  });
-
-  it("offers setup to an administrator and reports which providers are configured", async () => {
-    const lookup = vi.fn(async (id: string) => id === "pipedream");
     const response = await call(
       "get",
-      baseDeps(admin, { integrationSettings: { configured: lookup } }),
+      baseDeps(member, { integrationSettings: { configured: lookup } }),
     );
     const result = (await response.json()).json;
     expect(result).toMatchObject({ canConfigure: true, needsSetup: false });
     expect(result.providers).toEqual([
-      { id: "composio", configured: false },
-      { id: "pipedream", configured: true },
+      { id: "composio", configured: true },
+      { id: "pipedream", configured: false },
     ]);
+    expect(lookup).toHaveBeenCalledWith("composio", "user");
   });
 
-  it("needs setup when no provider is configured", async () => {
+  it("needs setup when the user has no key", async () => {
     const response = await call(
       "get",
-      baseDeps(admin, { integrationSettings: { configured: vi.fn(async () => false) } }),
+      baseDeps(member, { integrationSettings: { configured: vi.fn(async () => false) } }),
     );
     expect((await response.json()).json).toMatchObject({ canConfigure: true, needsSetup: true });
   });
 
-  it("rejects provider credentials from a non-administrator before verification or persistence", async () => {
-    const save = vi.fn();
-    const response = await call(
-      "save",
-      baseDeps({ ...admin, email: "member@anviq.test" }, { integrationSettings: { save } }),
-      { provider: "composio", apiKey: "fake-key" },
-    );
-    expect(response.status).toBe(403);
-    expect(save).not.toHaveBeenCalled();
-  });
-
-  it("saves provider credentials for an administrator", async () => {
+  it("saves a member's Composio key under their own user", async () => {
     const save = vi.fn(async () => undefined);
-    const response = await call("save", baseDeps(admin, { integrationSettings: { save } }), {
+    const response = await call("save", baseDeps(member, { integrationSettings: { save } }), {
       provider: "composio",
       apiKey: "fake-key",
     });
@@ -3960,11 +3938,43 @@ describe("integration setup authorization", () => {
     );
   });
 
+  const pipedream = {
+    provider: "pipedream",
+    clientId: "client",
+    clientSecret: "fake-secret",
+    projectId: "project",
+  };
+
+  it("keeps deployment-wide providers to administrators", async () => {
+    const save = vi.fn(async () => undefined);
+    const denied = await call(
+      "save",
+      baseDeps(member, { integrationSettings: { save } }),
+      pipedream,
+    );
+    expect(denied.status).toBe(403);
+    expect(save).not.toHaveBeenCalled();
+    const unverified = await call(
+      "save",
+      baseDeps({ ...admin, emailVerified: false }, { integrationSettings: { save } }),
+      pipedream,
+    );
+    expect(unverified.status).toBe(403);
+    expect(save).not.toHaveBeenCalled();
+    const allowed = await call(
+      "save",
+      baseDeps(admin, { integrationSettings: { save } }),
+      pipedream,
+    );
+    expect(allowed.status).toBe(200);
+    expect(save).toHaveBeenCalledOnce();
+  });
+
   it("does not echo provider errors that could contain credentials", async () => {
     const save = vi.fn(async () => {
       throw new Error("bad key fake-key");
     });
-    const response = await call("save", baseDeps(admin, { integrationSettings: { save } }), {
+    const response = await call("save", baseDeps(member, { integrationSettings: { save } }), {
       provider: "composio",
       apiKey: "fake-key",
     });
@@ -4002,7 +4012,13 @@ describe("server operation authorization", () => {
         () => client.updater.check({}),
         () => client.updater.apply({}),
         () => client.computer.releaseInterrupted({ id: "update-1", workersStopped: true }),
-        () => client.integrationSetup.save({ provider: "composio", apiKey: "fake-key" }),
+        () =>
+          client.integrationSetup.save({
+            provider: "pipedream",
+            clientId: "client",
+            clientSecret: "fake-secret",
+            projectId: "project",
+          }),
       ])
         await expect(call()).rejects.toMatchObject({ code: "FORBIDDEN" });
       expect(prisma.deploymentSettings.update).not.toHaveBeenCalled();

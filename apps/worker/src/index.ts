@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { JobPublisher, JobWorkerHost } from "@anviq/adapter-kit";
-import { ComposioConnector, IntegrationProviderSettings } from "@anviq/adapters";
+import { IntegrationProviderSettings } from "@anviq/adapters";
 import { phoneCallSettings } from "@anviq/core";
 import { loadRootEnv } from "@anviq/core/node/load-root-env";
 import { stopOnShutdownSignals } from "@anviq/core/node/shutdown-signals";
@@ -41,7 +41,6 @@ import {
   InMemoryJobQueue,
   InstalledConnectorProvider,
   installedMessaging,
-  isComposioEnabled,
   isMessagingSurfaceEnabled,
   isPipedreamEnabled,
   McpConnector,
@@ -197,9 +196,6 @@ async function main() {
     secrets,
     resolveEncryptionKey(process.env),
     {
-      composio: isComposioEnabled(process.env.COMPOSIO_API_KEY)
-        ? new ComposioConnector({ apiKey: process.env.COMPOSIO_API_KEY })
-        : undefined,
       pipedream,
     },
   );
@@ -259,7 +255,7 @@ async function main() {
     connector: stack.connector,
     connectors: stack.connector,
     listConnectedPluginSlugs: async (userId) => {
-      const provider = await integrationSettings.resolve("composio");
+      const provider = await integrationSettings.resolve("composio", userId);
       if (!provider) return [];
       return provider.listConnectedExternalIds({
         userId,
@@ -271,7 +267,6 @@ async function main() {
     },
     secrets: [
       deploymentModelKey ?? "",
-      process.env.COMPOSIO_API_KEY ?? "",
       process.env.CURSOR_API_KEY ?? "",
       process.env.TYPESAFE_API_KEY ?? "",
     ].filter(Boolean),

@@ -264,7 +264,7 @@ export function connectionsRoutes(ctx: RouterContext) {
         const connector =
           deps.integrationSettings &&
           (input.connectorId === "composio" || input.connectorId === "pipedream")
-            ? await deps.integrationSettings.resolve(input.connectorId)
+            ? await deps.integrationSettings.resolve(input.connectorId, context.actor.userId)
             : deps.connectors.managed(input.connectorId);
         if (!connector) {
           throw new ORPCError("BAD_REQUEST", {
@@ -456,7 +456,7 @@ export function connectionsRoutes(ctx: RouterContext) {
         }
         const prepared =
           existing.status !== "connected"
-            ? await prepareManagedConnectorForTransaction(connector)
+            ? await prepareManagedConnectorForTransaction(connector, context.actor.userId)
             : { provider: connector, recheck: undefined };
         const transactionConnector = prepared.provider;
         if (!transactionConnector)
@@ -784,7 +784,7 @@ export function connectionsRoutes(ctx: RouterContext) {
           ? deps.connectors.managed(snapshot.connectorId)
           : undefined;
         const prepared = configured
-          ? await prepareManagedConnectorForTransaction(configured)
+          ? await prepareManagedConnectorForTransaction(configured, context.actor.userId)
           : undefined;
         const outcome = await providerLockTransaction(deps.prisma, async (tx) => {
           const row = await tx.connection.findFirst({

@@ -942,26 +942,26 @@ export function mcpRoutes(ctx: RouterContext) {
     },
     integrationSetup: {
       get: authed.integrationSetup.get.handler(async ({ context }) => {
-        const canConfigure = await isAdmin(deps, context.actor.userId);
-        const providers = canConfigure
-          ? await Promise.all(
-              IntegrationProviderIdSchema.options.map(async (id) => ({
-                id,
-                configured: deps.integrationSettings
-                  ? await deps.integrationSettings.configured(id)
-                  : Boolean(deps.connectors.managed(id)),
-              })),
-            )
-          : [];
+        const providers = await Promise.all(
+          IntegrationProviderIdSchema.options.map(async (id) => ({
+            id,
+            configured: deps.integrationSettings
+              ? await deps.integrationSettings.configured(id, context.actor.userId)
+              : Boolean(deps.connectors.managed(id)),
+          })),
+        );
         return {
-          canConfigure,
-          needsSetup: canConfigure && !providers.some((provider) => provider.configured),
+          canConfigure: true,
+          needsSetup: !providers.some((provider) => provider.configured),
           webUrl: new URL("/integrations/setup", deps.env.webOrigin).toString(),
           providers,
         };
       }),
       save: authed.integrationSetup.save.handler(async ({ context, input }) => {
-        if (!(await isAdmin(deps, context.actor.userId))) throw new ORPCError("FORBIDDEN");
+        // Composio keys belong to the person saving them; other providers are set once per deployment.
+        if (input.provider !== "composio" && !(await isAdmin(deps, context.actor.userId))) {
+          throw new ORPCError("FORBIDDEN");
+        }
         if (!deps.integrationSettings) throw new ORPCError("NOT_IMPLEMENTED");
         try {
           await deps.integrationSettings.save(input, {
