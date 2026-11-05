@@ -68,7 +68,6 @@ vi.mock("react-native", () => {
   };
 });
 vi.mock("./native", () => ({ native: {}, useMobileTokens: () => ({}) }));
-vi.mock("../components/native-switch", () => ({ NativeSwitch: () => null }));
 vi.mock("../components/settings-group", () => ({
   SettingsGroup: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   SettingsRow: ({ title, onPress }: { title: string; onPress?: () => void }) => (

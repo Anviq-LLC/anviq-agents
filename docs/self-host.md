@@ -1684,9 +1684,14 @@ the Compose file and free disk without changing anything.
 
 To update several instances, keep a list outside the repository (format in
 `infra/compose/fleet.example`, default `~/.config/anviq/fleet`) and run
-`infra/compose/fleet.sh update sha-<commit> [--dry-run]`. It copies the update script to each host,
-runs it, and stops at the first failure. `infra/compose/fleet.sh versions` prints the image tag and
-revision each instance runs.
+`infra/compose/fleet.sh update sha-<commit> [--dry-run] [--canary a,b] [--parallel N] [--only a,b]`.
+It copies the update script and the release's Compose file to each host and runs the update. The
+canary instances (by default the first in the list) update one after another and gate the rest,
+which then update N at a time. After any failure no further instance is started, and running the
+same command again carries on, because an instance already on the tag is skipped. Run it with
+`--dry-run` first to check every host, its registry access and its disk without changing anything.
+`infra/compose/fleet.sh versions [--parallel N]` prints the image tag and revision each instance
+runs and marks any it cannot reach.
 
 Source checkouts (not Compose) still upgrade the old way: pull, rebuild with
 `GIT_SHA=$(git rev-parse HEAD)`, run `pnpm db:migrate`, then restart API and worker.
