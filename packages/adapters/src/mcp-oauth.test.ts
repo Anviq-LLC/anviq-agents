@@ -317,6 +317,7 @@ describe("MCP OAuth", () => {
       },
       botSecret: { count: async () => 0 },
       integrationProviderConfig: { count: async () => 0 },
+      userIntegrationProviderConfig: { count: async () => 0 },
     };
     const prisma = {
       ...tables,

@@ -1250,6 +1250,7 @@ describe("MCP prepared credential updates", () => {
       botSecret: { count: async () => 0 },
       vaultCredential: { count: async () => 0 },
       integrationProviderConfig: { count: async () => 0 },
+      userIntegrationProviderConfig: { count: async () => 0 },
       $executeRaw: async () => 1,
       $queryRaw: async () => [],
       async $transaction(callback: (tx: typeof prisma) => Promise<unknown>) {
@@ -2801,7 +2802,7 @@ describe("connections.complete", () => {
           userId: "user-1",
           signal: new AbortController().signal,
         },
-        { recordId: "integration-provider:composio" },
+        { recordId: "integration-provider:composio:user-1" },
       );
       let ref = stored.ref;
       let inTransaction = false;
@@ -2822,8 +2823,8 @@ describe("connections.complete", () => {
         createdAt: new Date(0),
       };
       const client = {
-        integrationProviderConfig: {
-          findUnique: vi.fn(async () => ({ id: "composio", ciphertext: ref })),
+        userIntegrationProviderConfig: {
+          findUnique: vi.fn(async () => ({ ciphertext: ref })),
         },
         connection: {
           findFirst: vi.fn(async () => row),

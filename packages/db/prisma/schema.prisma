@@ -1835,13 +1835,15 @@ model IntegrationProviderConfig {
 
 // A user's own integration provider key, encrypted; never exposed through read DTOs.
 model UserIntegrationProviderConfig {
+  // "<provider>:<userId>", the record id the encrypted key is bound to.
+  id         String   @id
   userId     String
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider   String
   ciphertext String
   updatedAt  DateTime @updatedAt
 
-  @@id([userId, provider])
+  @@unique([userId, provider])
   @@map("user_integration_provider_configs")
 }
 

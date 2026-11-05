@@ -27,21 +27,11 @@ function fixture() {
       }),
     },
     userIntegrationProviderConfig: {
-      findUnique: vi.fn(
-        async ({ where }: { where: { userId_provider: { userId: string; provider: string } } }) =>
-          rows.get(`${where.userId_provider.userId}:${where.userId_provider.provider}`) ?? null,
-      ),
-      upsert: vi.fn(
-        async ({
-          create,
-        }: {
-          create: { userId: string; provider: string; ciphertext: string };
-        }) => {
-          const row = { id: `${create.userId}:${create.provider}`, ciphertext: create.ciphertext };
-          rows.set(row.id, row);
-          return row;
-        },
-      ),
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) => rows.get(where.id) ?? null),
+      upsert: vi.fn(async ({ create }: { create: { id: string; ciphertext: string } }) => {
+        rows.set(create.id, create);
+        return create;
+      }),
     },
   };
   const adapter = {
@@ -105,20 +95,20 @@ describe("integration provider settings", () => {
   it("binds a stored key to its owner so another user's row cannot be read as theirs", async () => {
     const f = fixture();
     await f.settings.save({ provider: "composio", apiKey: "fake-first-key" }, context);
-    f.rows.set("someone-else:composio", f.rows.get("user:composio")!);
+    f.rows.set("composio:someone-else", f.rows.get("composio:user")!);
     await expect(f.settings.resolve("composio", "someone-else")).rejects.toThrow();
   });
   it("preserves working settings and hides provider error details on failed verification", async () => {
     const f = fixture();
     await f.settings.save({ provider: "composio", apiKey: "fake-working-key" }, context);
-    const before = f.rows.get("user:composio");
+    const before = f.rows.get("composio:user");
     vi.mocked(f.adapter.listConnectedExternalIds).mockRejectedValueOnce(
       new Error("fake-secret-in-provider-response"),
     );
     await expect(
       f.settings.save({ provider: "composio", apiKey: "fake-bad-key" }, context),
     ).rejects.toThrow("Could not verify these credentials");
-    expect(f.rows.get("user:composio")).toBe(before);
+    expect(f.rows.get("composio:user")).toBe(before);
   });
   it("declines routeless lookups for unconfigured providers but still requires setup for routed calls", async () => {
     const f = fixture();

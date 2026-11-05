@@ -63,7 +63,7 @@ export class IntegrationProviderSettings {
     // Narrowed to the one user by the key; callers may run outside any request.
     return runAsSystem("read a user's integration provider key", () =>
       this.prisma.userIntegrationProviderConfig.findUnique({
-        where: { userId_provider: { userId, provider: id } },
+        where: { id: `${id}:${userId}` },
         select: { ciphertext: true },
       }),
     );
@@ -127,9 +127,15 @@ export class IntegrationProviderSettings {
       recordId: this.recordId(config.provider, userId),
     });
     if (userId) {
+      const rowId = `${config.provider}:${userId}`;
       await this.prisma.userIntegrationProviderConfig.upsert({
-        where: { userId_provider: { userId, provider: config.provider } },
-        create: { userId, provider: config.provider, ciphertext: stored.ciphertext },
+        where: { id: rowId },
+        create: {
+          id: rowId,
+          userId,
+          provider: config.provider,
+          ciphertext: stored.ciphertext,
+        },
         update: { ciphertext: stored.ciphertext },
       });
     } else {
@@ -187,7 +193,7 @@ class ConfiguredIntegrationProvider implements ManagedConnectorProvider {
       ) => {
         const current = PER_USER.has(this.id)
           ? await client.userIntegrationProviderConfig.findUnique({
-              where: { userId_provider: { userId, provider: this.id } },
+              where: { id: `${this.id}:${userId}` },
               select: { ciphertext: true },
             })
           : await client.integrationProviderConfig.findUnique({

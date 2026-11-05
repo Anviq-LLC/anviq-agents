@@ -102,6 +102,15 @@ function rowsFor(t: Tenant, tag: string): Array<[string, Record<string, unknown>
       { spaceId: t.spaceId, userId: t.userId, name: `n-${tag}`, description: "d", content: "c" },
     ],
     ["userVoiceCredential", { userId: t.userId, provider: "p", secretId: t.personalSecretId }],
+    [
+      "userIntegrationProviderConfig",
+      {
+        id: `${tag === "fixture" ? "composio" : "pipedream"}:${t.userId}`,
+        userId: t.userId,
+        provider: tag === "fixture" ? "composio" : "pipedream",
+        ciphertext: "c",
+      },
+    ],
   ];
 }
 
@@ -249,9 +258,15 @@ describePostgres("row-level security (PostgreSQL)", () => {
         "taughtSkill",
         "agentSkill",
         "userVoiceCredential",
+        "userIntegrationProviderConfig",
       ].map(async (table) => {
-        const scope =
-          table === "userVoiceCredential" || table === "vaultCredential" ? "userId" : "spaceId";
+        const scope = [
+          "userVoiceCredential",
+          "vaultCredential",
+          "userIntegrationProviderConfig",
+        ].includes(table)
+          ? "userId"
+          : "spaceId";
         const ids = tenants.map((t) => t[scope]);
         const rows = (await Reflect.get(db, table).findMany({
           where: { [scope]: { in: ids } },
@@ -709,6 +724,7 @@ describePostgres("row-level security (PostgreSQL)", () => {
       taughtSkill: [],
       agentSkill: [],
       userVoiceCredential: [],
+      userIntegrationProviderConfig: [],
     };
     expect(await owners()).toEqual(none);
     expect(await runAsTenant(a, owners)).toEqual({
@@ -719,6 +735,7 @@ describePostgres("row-level security (PostgreSQL)", () => {
       taughtSkill: [a.spaceId],
       agentSkill: [a.spaceId],
       userVoiceCredential: [a.userId],
+      userIntegrationProviderConfig: [a.userId],
     });
     const everyone = await runAsSystem("row-level security test", owners);
     expect(everyone.agentSkill).toEqual(tenants.map((t) => t.spaceId).sort());
