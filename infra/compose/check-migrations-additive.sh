@@ -12,7 +12,7 @@ pattern='DROP (TABLE|COLUMN|TYPE|DEFAULT)|RENAME|SET NOT NULL|ALTER COLUMN .* TY
 status=0
 while IFS= read -r file; do
   [[ -n "${file}" ]] || continue
-  [[ "$(head -n 1 "${file}" | tr -d "")" == "-- deferred" ]] && continue
+  [[ "$(head -n 1 "${file}" | tr -d '\r')" == "-- deferred" ]] && continue
   hits="$(grep -niE "${pattern}" "${file}" | grep -vi -- '-- allow-destructive:' || true)"
   if [[ -n "${hits}" ]]; then
     echo "${file} is not additive:" >&2
