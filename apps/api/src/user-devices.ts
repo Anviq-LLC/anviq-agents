@@ -20,6 +20,7 @@ import type { PrismaClient } from "@anviq/db";
 import { recordSecurityEvent, runAsSystem } from "@anviq/db";
 import type { Hono } from "hono";
 import { readBoundedBody } from "./http-body.js";
+import { lockOwner } from "./owner-lock.js";
 
 const FORWARD_BODY_MAX_BYTES = 13 * 1024 * 1024;
 
@@ -108,20 +109,25 @@ export function mountUserDeviceRoutes(app: Hono, deps: UserDeviceRouteDeps) {
     const input = userDevicePairRequest.safeParse(parseJson(body));
     if (!input.success) return c.json({ error: "Invalid device" }, 400);
     const token = createUserDeviceToken();
-    const device = await runAsSystem("pair a user device", async () => {
-      const active = await prisma.userDevice.count({ where: { userId, revokedAt: null } });
-      if (active >= USER_DEVICE_LIMIT) return null;
-      return prisma.userDevice.create({
-        data: {
-          userId,
-          name: input.data.name,
-          platform: input.data.platform,
-          tokenHash: hashUserDeviceToken(token),
-          sessionId,
-        },
-        select: { id: true },
-      });
-    });
+    const device = await runAsSystem("pair a user device", () =>
+      prisma.$transaction(async (tx) => {
+        // Hold the account's pairing lock across the count and the insert, so pairings
+        // that race cannot each see the limit as still open.
+        await lockOwner(tx, userId, "user-devices");
+        const active = await tx.userDevice.count({ where: { userId, revokedAt: null } });
+        if (active >= USER_DEVICE_LIMIT) return null;
+        return tx.userDevice.create({
+          data: {
+            userId,
+            name: input.data.name,
+            platform: input.data.platform,
+            tokenHash: hashUserDeviceToken(token),
+            sessionId,
+          },
+          select: { id: true },
+        });
+      }),
+    );
     if (!device) return c.json({ error: "Remove a computer before adding another" }, 409);
     await recordSecurityEvent({
       type: "device.paired",
