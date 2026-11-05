@@ -1488,6 +1488,14 @@ msgstr "Complete"
 msgid "Completed"
 msgstr "Completed"
 
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Composio API key"
+msgstr "Composio API key"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Composio key"
+msgstr "Composio key"
+
 #: src/pages/SettingsOverlay.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/message-view.tsx
@@ -5062,6 +5070,7 @@ msgstr "Saturday"
 
 #: src/components/ApprovalRulesSettings.tsx
 #: src/components/AskCard.tsx
+#: src/components/integrations/IntegrationSetup.tsx
 #: src/components/PasskeySettings.tsx
 #: src/components/teach/SkillDraftCard.tsx
 #: src/components/TeamSettings.tsx

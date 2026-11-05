@@ -3866,73 +3866,110 @@ describe("computer terminal and file transfer", () => {
 });
 
 describe("integration setup authorization", () => {
-  it.each([
-    { owner: false, configured: false, needsSetup: false },
-    { owner: true, configured: false, needsSetup: false },
-    { owner: true, configured: true, needsSetup: false },
-  ])(
-    "never offers server setup to an app account: %j",
-    async ({ owner, configured, needsSetup }) => {
-      const lookup = vi.fn(async () => configured);
-      const deps = {
-        prisma: {},
-        env: { webOrigin: "https://example.test" },
-        integrationSettings: { configured: lookup },
-      } as unknown as RouterDeps;
-      const handler = new RPCHandler(createRouter(deps));
-      const { response } = await handler.handle(
-        new Request("https://example.test/rpc/integrationSetup/get", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ json: null }),
-        }),
-        {
-          prefix: "/rpc",
-          context: {
-            actor: {
-              userId: "user",
-              spaceId: "space",
-              email: "user@anviq.test",
-              isDeploymentOwner: owner,
-            },
-          },
-        },
-      );
-      const result = (await response.json()).json;
-      expect(result).toMatchObject({ canConfigure: false, needsSetup });
-      expect(result.providers).toEqual([]);
-      expect(lookup).not.toHaveBeenCalled();
-    },
-  );
-
-  it("rejects provider credentials from a non-owner before verification or persistence", async () => {
-    const save = vi.fn();
-    const deps = {
-      prisma: {},
-      env: { webOrigin: "https://example.test" },
-      integrationSettings: { save },
-    } as unknown as RouterDeps;
-    const handler = new RPCHandler(createRouter(deps));
+  const admin = { id: "user", email: "boss@anviq.test", emailVerified: true };
+  const call = async (
+    procedure: "get" | "save",
+    deps: Record<string, unknown>,
+    body: unknown = null,
+  ) => {
+    const handler = new RPCHandler(createRouter(deps as unknown as RouterDeps));
     const { response } = await handler.handle(
-      new Request("https://example.test/rpc/integrationSetup/save", {
+      new Request(`https://example.test/rpc/integrationSetup/${procedure}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ json: { provider: "composio", apiKey: "fake-key" } }),
+        body: JSON.stringify({ json: body }),
       }),
       {
         prefix: "/rpc",
         context: {
           actor: {
-            userId: "member",
+            userId: "user",
             spaceId: "space",
-            email: "member@anviq.test",
+            email: "user@anviq.test",
             isDeploymentOwner: false,
           },
         },
       },
     );
+    return response;
+  };
+  const baseDeps = (user: typeof admin | null, extra: Record<string, unknown> = {}) => ({
+    prisma: { user: { findUnique: vi.fn(async () => user) } },
+    env: { webOrigin: "https://example.test", adminEmails: ["boss@anviq.test"] },
+    ...extra,
+  });
+
+  it.each([
+    { name: "a member", user: { ...admin, email: "member@anviq.test" } },
+    { name: "an unverified admin email", user: { ...admin, emailVerified: false } },
+  ])("never offers server setup to $name", async ({ user }) => {
+    const lookup = vi.fn(async () => true);
+    const response = await call(
+      "get",
+      baseDeps(user, { integrationSettings: { configured: lookup } }),
+    );
+    const result = (await response.json()).json;
+    expect(result).toMatchObject({ canConfigure: false, needsSetup: false });
+    expect(result.providers).toEqual([]);
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("offers setup to an administrator and reports which providers are configured", async () => {
+    const lookup = vi.fn(async (id: string) => id === "pipedream");
+    const response = await call(
+      "get",
+      baseDeps(admin, { integrationSettings: { configured: lookup } }),
+    );
+    const result = (await response.json()).json;
+    expect(result).toMatchObject({ canConfigure: true, needsSetup: false });
+    expect(result.providers).toEqual([
+      { id: "composio", configured: false },
+      { id: "pipedream", configured: true },
+    ]);
+  });
+
+  it("needs setup when no provider is configured", async () => {
+    const response = await call(
+      "get",
+      baseDeps(admin, { integrationSettings: { configured: vi.fn(async () => false) } }),
+    );
+    expect((await response.json()).json).toMatchObject({ canConfigure: true, needsSetup: true });
+  });
+
+  it("rejects provider credentials from a non-administrator before verification or persistence", async () => {
+    const save = vi.fn();
+    const response = await call(
+      "save",
+      baseDeps({ ...admin, email: "member@anviq.test" }, { integrationSettings: { save } }),
+      { provider: "composio", apiKey: "fake-key" },
+    );
     expect(response.status).toBe(403);
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it("saves provider credentials for an administrator", async () => {
+    const save = vi.fn(async () => undefined);
+    const response = await call("save", baseDeps(admin, { integrationSettings: { save } }), {
+      provider: "composio",
+      apiKey: "fake-key",
+    });
+    expect(response.status).toBe(200);
+    expect(save).toHaveBeenCalledWith(
+      { provider: "composio", apiKey: "fake-key" },
+      expect.objectContaining({ userId: "user", spaceId: "space" }),
+    );
+  });
+
+  it("does not echo provider errors that could contain credentials", async () => {
+    const save = vi.fn(async () => {
+      throw new Error("bad key fake-key");
+    });
+    const response = await call("save", baseDeps(admin, { integrationSettings: { save } }), {
+      provider: "composio",
+      apiKey: "fake-key",
+    });
+    expect(response.status).toBe(400);
+    expect(JSON.stringify(await response.json())).not.toContain("fake-key");
   });
 });
 

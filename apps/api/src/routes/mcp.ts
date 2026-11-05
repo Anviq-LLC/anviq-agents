@@ -13,12 +13,13 @@ import {
   verifyMcpInstall,
 } from "@anviq/adapters";
 import type { Actor } from "@anviq/contracts";
-import { signupSurveyAsksTeamSize } from "@anviq/contracts";
+import { IntegrationProviderIdSchema, signupSurveyAsksTeamSize } from "@anviq/contracts";
 import { containsSecret } from "@anviq/core";
 import type { Prisma } from "@anviq/db";
 import { IsolationError } from "@anviq/db";
 import { getLogger } from "@anviq/logging";
 import { ORPCError } from "@orpc/server";
+import { isAdmin } from "../admins.js";
 import { searchIntegrationCatalog } from "../integration-catalog.js";
 import {
   queueMcpConnectedRun,
@@ -940,14 +941,42 @@ export function mcpRoutes(ctx: RouterContext) {
       }),
     },
     integrationSetup: {
-      get: authed.integrationSetup.get.handler(() => ({
-        canConfigure: false,
-        needsSetup: false,
-        webUrl: new URL("/integrations/setup", deps.env.webOrigin).toString(),
-        providers: [],
-      })),
-      save: authed.integrationSetup.save.handler(() => {
-        throw new ORPCError("FORBIDDEN");
+      get: authed.integrationSetup.get.handler(async ({ context }) => {
+        const canConfigure = await isAdmin(deps, context.actor.userId);
+        const providers = canConfigure
+          ? await Promise.all(
+              IntegrationProviderIdSchema.options.map(async (id) => ({
+                id,
+                configured: deps.integrationSettings
+                  ? await deps.integrationSettings.configured(id)
+                  : Boolean(deps.connectors.managed(id)),
+              })),
+            )
+          : [];
+        return {
+          canConfigure,
+          needsSetup: canConfigure && !providers.some((provider) => provider.configured),
+          webUrl: new URL("/integrations/setup", deps.env.webOrigin).toString(),
+          providers,
+        };
+      }),
+      save: authed.integrationSetup.save.handler(async ({ context, input }) => {
+        if (!(await isAdmin(deps, context.actor.userId))) throw new ORPCError("FORBIDDEN");
+        if (!deps.integrationSettings) throw new ORPCError("NOT_IMPLEMENTED");
+        try {
+          await deps.integrationSettings.save(input, {
+            operationId: "integrationSetup.save",
+            traceId: "integrationSetup.save",
+            spaceId: context.actor.spaceId,
+            userId: context.actor.userId,
+            signal: context.signal ?? new AbortController().signal,
+          });
+        } catch {
+          throw new ORPCError("BAD_REQUEST", {
+            message: "Could not verify or save these credentials",
+          });
+        }
+        return { ok: true as const };
       }),
     },
   };
