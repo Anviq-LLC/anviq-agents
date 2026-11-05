@@ -132,6 +132,7 @@ export function createUserDeviceAccess(deps: {
   const consent = new Map<string, DeviceConsent | null>();
   /** Bumped on every consent change, so a prompt answered after one is ignored. */
   const changes = new Map<string, number>();
+  const consentSaves = new Map<string, Promise<void>>();
   const unavailable = new Set<string>();
   const prompts = new Map<string, Promise<boolean>>();
   const pairings = new Map<string, Promise<void>>();
@@ -164,7 +165,21 @@ export function createUserDeviceAccess(deps: {
   async function decide(origin: string, choice: DeviceConsent) {
     consent.set(origin, choice);
     changes.set(origin, (changes.get(origin) ?? 0) + 1);
-    await saveDeviceConsent(deps.userDataDir, origin, choice);
+    const save = (consentSaves.get(origin) ?? Promise.resolve()).then(() =>
+      saveDeviceConsent(deps.userDataDir, origin, choice).catch(async (error) => {
+        // An earlier "allowed" left on disk would be honoured on the next launch.
+        if (choice === "declined")
+          await rm(deviceFile(deps.userDataDir, origin, ".consent"), { force: true }).catch(
+            () => undefined,
+          );
+        throw error;
+      }),
+    );
+    consentSaves.set(
+      origin,
+      save.catch(() => undefined),
+    );
+    await save;
   }
 
   function ask(origin: string) {
@@ -284,7 +299,7 @@ export function createUserDeviceAccess(deps: {
         readDeviceConsent(deps.userDataDir, origin),
       ]);
       if (selection !== generation) return;
-      consent.set(origin, choice);
+      if (consent.get(origin) !== "declined") consent.set(origin, choice);
       if (device) {
         paired.set(origin, device.deviceId);
         start(origin, device.token);
@@ -309,8 +324,9 @@ export function createUserDeviceAccess(deps: {
     async setAllowed(origin: string, allowed: boolean) {
       if (origin !== current) return;
       if (!allowed) {
-        await decide(origin, "declined");
+        const saving = decide(origin, "declined");
         if (client?.origin === origin) client.cancelAll();
+        await saving;
         return;
       }
       const seen = changes.get(origin);
