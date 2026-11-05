@@ -16,6 +16,7 @@ loadRootEnv();
 const urls = databaseUrls(process.env);
 await deployMigrations({
   migrationUrl: urls.migrationUrl,
+  previousMigrations: process.env.ANVIQ_DEPLOYED_MIGRATIONS?.split(","),
   dbPackageDir: execFileSync("pnpm", ["--filter", "@anviq/db", "exec", "pwd"], {
     encoding: "utf8",
   }).trim(),
