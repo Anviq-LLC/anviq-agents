@@ -263,6 +263,7 @@ describe("MCP OAuth", () => {
     let lock = Promise.resolve();
     let credentialLocked = false;
     const lockSettings: string[] = [];
+    const transactionOptions: unknown[] = [];
     const tables = {
       mcpOAuthSession: {
         count: async () => sessions.length,
@@ -319,7 +320,8 @@ describe("MCP OAuth", () => {
     };
     const prisma = {
       ...tables,
-      $transaction: async <T>(callback: (tx: unknown) => Promise<T>) => {
+      $transaction: async <T>(callback: (tx: unknown) => Promise<T>, options?: unknown) => {
+        transactionOptions.push(options);
         let release: (() => void) | undefined;
         const tx = {
           ...tables,
@@ -402,6 +404,7 @@ describe("MCP OAuth", () => {
       server,
       context,
       lockSettings,
+      transactionOptions,
       get credentialLocked() {
         return credentialLocked;
       },
@@ -1021,6 +1024,9 @@ describe("MCP OAuth", () => {
         userId: shared.context.userId,
       }),
     ).rejects.toThrow("MCP OAuth session is invalid or expired");
+    // The check may wait on a remote secret read, so it does not run on the default timeout.
+    expect(shared.transactionOptions.at(-1)).toMatchObject({ timeout: 60_000 });
+    expect(shared.lockSettings.at(-2)).toContain("lock_timeout");
     // The newer connection is left intact.
     expect(await shared.stored()).toEqual(reconnected);
     expect(await broker.statusFor(shared.server, shared.context)).toBe("connected");
