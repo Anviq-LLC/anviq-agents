@@ -47,4 +47,9 @@ if FAKE_UP_FAIL=1 ANVIQ_COMPOSE_FILE="$scratch/new.yml" bash "$root/update-insta
 out="$(ANVIQ_COMPOSE_FILE="$scratch/new.yml" bash "$root/update-instance.sh" sha-new 2>&1)" || fail "update failed: $out"
 [[ "$(cat "$scratch/inst/docker-compose.images.yml")" == "services: new" ]] || fail "update did not install the new Compose file"
 ls "$scratch"/inst/docker-compose.images.yml.pre-update-* >/dev/null 2>&1 || fail "no copy of the old Compose file"
+
+: > "$CALLS"
+out="$(ANVIQ_COMPOSE_FILE="$scratch/new.yml" bash "$root/update-instance.sh" sha-new 2>&1)" || fail "second run failed: $out"
+[[ "$out" == *"Already on sha-new"* ]] || fail "re-running the same release was not skipped: $out"
+! grep -qE ' (up|pull|exec) ' "$CALLS" || fail "a skipped update touched containers"
 echo "update-instance smoke ok"

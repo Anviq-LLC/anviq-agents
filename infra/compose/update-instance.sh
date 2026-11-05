@@ -87,6 +87,11 @@ previous_image="$(docker inspect --format '{{.Image}}' "$(compose ps -q api)" 2>
 previous_tag="$(sed -n 's/^ANVIQ_IMAGE_TAG=//p' .env | tail -n 1)"
 previous_computer_tag="$(sed -n 's/^ANVIQ_COMPUTER_IMAGE_TAG=//p' .env | tail -n 1)"
 
+if [[ "${previous_tag}" == "${TAG}" && -z "${new_compose}" ]]; then
+  echo "Already on ${TAG}"
+  exit 0
+fi
+
 mkdir -p "${BACKUP_DIR}"
 chmod 700 "${BACKUP_DIR}"
 dump="${BACKUP_DIR}/anviq-pre-update-${STAMP}.dump"
