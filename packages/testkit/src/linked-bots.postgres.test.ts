@@ -20,6 +20,8 @@ describeWithDatabase("linked bots", () => {
   let benPersonalSpaceId: string;
   let originalId: string;
   let secret: string;
+  let mixedGroupId: string;
+  let linkId: string;
 
   const personalSpaceOf = async (person: Person) => {
     const memberships = await harness.db.spaceMember.findMany({
@@ -111,6 +113,19 @@ describeWithDatabase("linked bots", () => {
     expect(named).toHaveLength(1);
   });
 
+  it("keeps link rows out of unique lookups as well", async () => {
+    const link = await harness.db.bot.findFirstOrThrow({
+      where: { spaceId: harness.teamSpaceId, linkedFromBotId: originalId },
+      select: { id: true },
+    });
+    expect(await harness.db.bot.findUnique({ where: { id: link.id } })).toBeNull();
+    await expect(harness.db.bot.findUniqueOrThrow({ where: { id: link.id } })).rejects.toThrow();
+    const named = await harness.db.bot.findUnique({
+      where: { id: link.id, linkedFromBotId: originalId },
+    });
+    expect(named).not.toBeNull();
+  });
+
   it("leaves the original unreadable from the team space, even to its owner", async () => {
     for (const person of [ana, ben]) {
       const rows = await runAsTenant({ spaceId: harness.teamSpaceId, userId: person.userId }, () =>
@@ -168,6 +183,154 @@ describeWithDatabase("linked bots", () => {
         },
       }),
     ).rejects.toThrow(/owner must belong to the space/);
+  });
+
+  it("offers a person only their own other bots, with the link once there is one", async () => {
+    const anaList = await harness.ok<Array<{ id: string; linkedBotId: string | null }>>(
+      ana,
+      "bots/linkable",
+      {},
+    );
+    expect(anaList.map((bot) => bot.id)).toContain(originalId);
+    const benList = await harness.ok<Array<{ id: string }>>(ben, "bots/linkable", {});
+    expect(benList.map((bot) => bot.id)).not.toContain(originalId);
+    expect(JSON.stringify(benList)).not.toContain(secret);
+  });
+
+  it("puts a personal bot into a team group through its link", async () => {
+    const teamBot = await harness.ok<{ id: string }>(ana, "bots/create", {
+      name: "Ana Team Bot",
+      title: "",
+      description: "",
+      instructions: "",
+      notifyOnFinish: false,
+    });
+    const group = await harness.ok<{ id: string; members: Array<{ botId: string }> }>(
+      ana,
+      "groups/create",
+      { name: "Mixed", botIds: [teamBot.id, originalId] },
+    );
+    const link = await harness.db.bot.findFirstOrThrow({
+      where: { spaceId: harness.teamSpaceId, linkedFromBotId: originalId },
+    });
+    expect(group.members.map((member) => member.botId).sort()).toEqual(
+      [teamBot.id, link.id].sort(),
+    );
+    expect(JSON.stringify(group)).not.toContain(secret);
+    mixedGroupId = group.id;
+    linkId = link.id;
+  });
+
+  it("answers in the team group as the linked bot", async () => {
+    const sent = await harness.ok<{ runId: string; runIds?: string[] }>(ana, "threads/send", {
+      groupId: mixedGroupId,
+      text: "Ana Original, please say hello",
+      mentions: [linkId],
+    });
+    const runIds = sent.runIds ?? [sent.runId];
+    const runs = await harness.db.run.findMany({
+      where: { id: { in: runIds }, botId: linkId },
+      select: { id: true, spaceId: true, userId: true },
+    });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ spaceId: harness.teamSpaceId, userId: ana.userId });
+    const runId = runs[0]!.id;
+    let status = "";
+    let error: string | null = null;
+    for (let waited = 0; waited < 20_000; waited += 100) {
+      const run = await harness.db.run.findUniqueOrThrow({
+        where: { id: runId },
+        select: { status: true, error: true },
+      });
+      status = run.status;
+      error = run.error;
+      if (["completed", "failed", "cancelled"].includes(status)) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    expect({ status, error }).toEqual({ status: "completed", error: null });
+    const reply = await harness.db.message.findFirst({
+      where: { role: "bot", botId: linkId, thread: { groupId: mixedGroupId } },
+      select: { id: true },
+    });
+    expect(reply, "the linked bot's reply").not.toBeNull();
+    const thread = await harness.db.message.findMany({
+      where: { thread: { groupId: mixedGroupId } },
+      select: { blocks: true },
+    });
+    expect(
+      JSON.stringify(thread),
+      "the original's instructions reached the team thread",
+    ).not.toContain(secret);
+  }, 60_000);
+
+  it("refuses to put someone else's bot into a group", async () => {
+    const anaBot = await harness.ok<{ id: string }>(ana, "bots/create", {
+      name: "Ana Another",
+      title: "",
+      description: "",
+      instructions: "",
+      notifyOnFinish: false,
+    });
+    const response = await harness.call(ben, "groups/create", {
+      name: "Borrowed",
+      botIds: [anaBot.id, originalId],
+    });
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(
+      await harness.db.bot.count({
+        where: { spaceId: harness.teamSpaceId, userId: ben.userId, linkedFromBotId: { not: null } },
+      }),
+    ).toBe(0);
+  });
+
+  it("takes a leaving person's links out of the team's groups without touching their bots", async () => {
+    const benOriginal = await harness.db.bot.create({
+      data: {
+        spaceId: benPersonalSpaceId,
+        userId: ben.userId,
+        name: "Ben Original",
+        instructions: `ben-${secret}`,
+        color: "#22aa66",
+      },
+      select: { id: true },
+    });
+    const benTeamBot = await harness.ok<{ id: string }>(ben, "bots/create", {
+      name: "Ben Team Bot",
+      title: "",
+      description: "",
+      instructions: "",
+      notifyOnFinish: false,
+    });
+    const group = await harness.ok<{ id: string }>(ben, "groups/create", {
+      name: "Ben mixed",
+      botIds: [benTeamBot.id, benOriginal.id],
+    });
+    const benLink = await harness.db.bot.findFirstOrThrow({
+      where: { spaceId: harness.teamSpaceId, linkedFromBotId: benOriginal.id },
+      select: { id: true },
+    });
+    // Ben's own team bot is archived; his link does not count as an active bot.
+    await harness.db.bot.update({ where: { id: benTeamBot.id }, data: { archivedAt: new Date() } });
+    const organizationId = (
+      await harness.db.space.findFirstOrThrow({
+        where: { id: harness.teamSpaceId },
+        select: { organizationId: true },
+      })
+    ).organizationId;
+    await harness.ok(ben, "organizations/leave", { organizationId });
+    const link = await harness.db.bot.findFirstOrThrow({
+      where: { id: benLink.id, linkedFromBotId: benOriginal.id },
+      select: { archivedAt: true },
+    });
+    expect(link.archivedAt).not.toBeNull();
+    expect(
+      await harness.db.chatGroupMember.count({ where: { groupId: group.id, botId: benLink.id } }),
+    ).toBe(0);
+    const original = await harness.db.bot.findUniqueOrThrow({
+      where: { id: benOriginal.id },
+      select: { archivedAt: true, instructions: true },
+    });
+    expect(original).toMatchObject({ archivedAt: null, instructions: `ben-${secret}` });
   });
 
   it("follows the original's name and look, and its archiving", async () => {

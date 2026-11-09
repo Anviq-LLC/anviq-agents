@@ -155,6 +155,8 @@ async function assertOwnedBots(
       spaceId: actor.spaceId,
       userId: actor.userId,
       archivedAt: null,
+      // A group in a team space can hold the person's linked bots as well.
+      linkedFromBotId: undefined,
     },
     select: { id: true, name: true, color: true },
   });
