@@ -283,6 +283,56 @@ describeWithDatabase("linked bots", () => {
     ).toBe(0);
   });
 
+  it("takes a leaving person's links out of the team's groups without touching their bots", async () => {
+    const benOriginal = await harness.db.bot.create({
+      data: {
+        spaceId: benPersonalSpaceId,
+        userId: ben.userId,
+        name: "Ben Original",
+        instructions: `ben-${secret}`,
+        color: "#22aa66",
+      },
+      select: { id: true },
+    });
+    const benTeamBot = await harness.ok<{ id: string }>(ben, "bots/create", {
+      name: "Ben Team Bot",
+      title: "",
+      description: "",
+      instructions: "",
+      notifyOnFinish: false,
+    });
+    const group = await harness.ok<{ id: string }>(ben, "groups/create", {
+      name: "Ben mixed",
+      botIds: [benTeamBot.id, benOriginal.id],
+    });
+    const benLink = await harness.db.bot.findFirstOrThrow({
+      where: { spaceId: harness.teamSpaceId, linkedFromBotId: benOriginal.id },
+      select: { id: true },
+    });
+    // Ben's own team bot is archived; his link does not count as an active bot.
+    await harness.db.bot.update({ where: { id: benTeamBot.id }, data: { archivedAt: new Date() } });
+    const organizationId = (
+      await harness.db.space.findFirstOrThrow({
+        where: { id: harness.teamSpaceId },
+        select: { organizationId: true },
+      })
+    ).organizationId;
+    await harness.ok(ben, "organizations/leave", { organizationId });
+    const link = await harness.db.bot.findFirstOrThrow({
+      where: { id: benLink.id, linkedFromBotId: benOriginal.id },
+      select: { archivedAt: true },
+    });
+    expect(link.archivedAt).not.toBeNull();
+    expect(
+      await harness.db.chatGroupMember.count({ where: { groupId: group.id, botId: benLink.id } }),
+    ).toBe(0);
+    const original = await harness.db.bot.findUniqueOrThrow({
+      where: { id: benOriginal.id },
+      select: { archivedAt: true, instructions: true },
+    });
+    expect(original).toMatchObject({ archivedAt: null, instructions: `ben-${secret}` });
+  });
+
   it("follows the original's name and look, and its archiving", async () => {
     await harness.db.bot.update({
       where: { id: originalId },
