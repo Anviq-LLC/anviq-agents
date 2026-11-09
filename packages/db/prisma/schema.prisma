@@ -569,6 +569,10 @@ model Bot {
   archivedAt        DateTime?
   parentBotId       String?
   spawnKey          String?
+  /// Set on a thin row in a team space that stands for its owner's own bot in another space.
+  linkedFromBotId   String?
+  linkedFrom        Bot?              @relation("BotLinks", fields: [linkedFromBotId], references: [id], onDelete: Cascade)
+  links             Bot[]             @relation("BotLinks")
   memoryScope       String?
   parent            Bot?              @relation("BotChildren", fields: [parentBotId], references: [id], onDelete: SetNull)
   children          Bot[]             @relation("BotChildren")
@@ -614,6 +618,7 @@ model Bot {
   @@index([sectionId])
   @@index([computerId])
   @@index([parentBotId])
+  @@index([linkedFromBotId])
   @@map("bots")
   messagingInstallations MessagingInstallation[]
   messagingInstallSessions MessagingInstallSession[]
