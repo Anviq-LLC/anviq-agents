@@ -170,6 +170,60 @@ describeWithDatabase("linked bots", () => {
     ).rejects.toThrow(/owner must belong to the space/);
   });
 
+  it("offers a person only their own other bots, with the link once there is one", async () => {
+    const anaList = await harness.ok<Array<{ id: string; linkedBotId: string | null }>>(
+      ana,
+      "bots/linkable",
+      {},
+    );
+    expect(anaList.map((bot) => bot.id)).toContain(originalId);
+    const benList = await harness.ok<Array<{ id: string }>>(ben, "bots/linkable", {});
+    expect(benList.map((bot) => bot.id)).not.toContain(originalId);
+    expect(JSON.stringify(benList)).not.toContain(secret);
+  });
+
+  it("puts a personal bot into a team group through its link", async () => {
+    const teamBot = await harness.ok<{ id: string }>(ana, "bots/create", {
+      name: "Ana Team Bot",
+      title: "",
+      description: "",
+      instructions: "",
+      notifyOnFinish: false,
+    });
+    const group = await harness.ok<{ id: string; members: Array<{ botId: string }> }>(
+      ana,
+      "groups/create",
+      { name: "Mixed", botIds: [teamBot.id, originalId] },
+    );
+    const link = await harness.db.bot.findFirstOrThrow({
+      where: { spaceId: harness.teamSpaceId, linkedFromBotId: originalId },
+    });
+    expect(group.members.map((member) => member.botId).sort()).toEqual(
+      [teamBot.id, link.id].sort(),
+    );
+    expect(JSON.stringify(group)).not.toContain(secret);
+  });
+
+  it("refuses to put someone else's bot into a group", async () => {
+    const anaBot = await harness.ok<{ id: string }>(ana, "bots/create", {
+      name: "Ana Another",
+      title: "",
+      description: "",
+      instructions: "",
+      notifyOnFinish: false,
+    });
+    const response = await harness.call(ben, "groups/create", {
+      name: "Borrowed",
+      botIds: [anaBot.id, originalId],
+    });
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(
+      await harness.db.bot.count({
+        where: { spaceId: harness.teamSpaceId, userId: ben.userId, linkedFromBotId: { not: null } },
+      }),
+    ).toBe(0);
+  });
+
   it("follows the original's name and look, and its archiving", async () => {
     await harness.db.bot.update({
       where: { id: originalId },
