@@ -60,6 +60,11 @@ jobs:
             echo "ai_version=$(node -p "require('./$pkg').dependencies['@earendil-works/pi-ai']")" >> "$GITHUB_OUTPUT"
             echo "core_version=$(node -p "require('./$pkg').dependencies['@earendil-works/pi-agent-core']")" >> "$GITHUB_OUTPUT"
           fi
+      - name: Generate the database client
+        if: steps.changed.outputs.changed == 'true'
+        run: pnpm db:generate
+        env:
+          DATABASE_URL: postgres://anviq:anviq@127.0.0.1:5433/anviq
       - name: Typecheck and test adapters
         if: steps.changed.outputs.changed == 'true'
         run: |
