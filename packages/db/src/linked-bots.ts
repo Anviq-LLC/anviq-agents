@@ -1,6 +1,8 @@
 import type { PrismaClient } from "./client.js";
+import { ensureComputerRecord } from "./computers.js";
 import { OrganizationError } from "./organizations.js";
 import { runAsSystem } from "./row-security.js";
+import { lockSpaceForContentCreation } from "./spaces.js";
 
 /*
  * A person's bot takes part in a team space through a link: a thin bot row in that space that
@@ -91,18 +93,37 @@ export async function linkBotIntoSpace(
       });
     const found = await existing();
     if (found) return { id: found.id, created: false };
+    const settings = await prisma.deploymentSettings.findUnique({ where: { id: "default" } });
+    const envKind = process.env.SANDBOX_PROVIDER ?? "docker";
+    const kind =
+      envKind === "docker" && settings?.computerHost === "this-mac" ? "desktop" : envKind;
     try {
-      const link = await prisma.bot.create({
-        data: {
+      const link = await prisma.$transaction(async (tx) => {
+        await lockSpaceForContentCreation(tx, { spaceId: input.spaceId, userId: actor.userId });
+        // Like any bot of the team space, a link works on the owner's computer there.
+        const computer = await ensureComputerRecord(tx, {
+          mode: "team",
           spaceId: input.spaceId,
           userId: actor.userId,
-          linkedFromBotId: original.id,
-          name: original.name,
-          title: original.title,
-          color: original.color,
-          notifyOnFinish: false,
-        },
-        select: { id: true },
+          kind,
+        });
+        const created = await tx.bot.create({
+          data: {
+            spaceId: input.spaceId,
+            userId: actor.userId,
+            linkedFromBotId: original.id,
+            name: original.name,
+            title: original.title,
+            color: original.color,
+            notifyOnFinish: false,
+            computerId: computer.id,
+          },
+          select: { id: true },
+        });
+        await tx.browserProfile.create({
+          data: { spaceId: input.spaceId, botId: created.id, userId: actor.userId },
+        });
+        return created;
       });
       return { id: link.id, created: true };
     } catch (error) {
@@ -210,4 +231,58 @@ export async function resolveGroupBotIds(
     }
   }
   return botIds.map((botId) => replacement.get(botId) ?? botId);
+}
+
+/** What a run of a linked bot takes from the person's own bot behind the link. */
+export type LinkedBotHome = {
+  instructions: string;
+  modelProvider: string | null;
+  modelId: string | null;
+  thinkingLevel: string | null;
+  disabledBuiltinTools: string[];
+};
+
+/**
+ * The persona and model of the bot behind a link, read for the link's owner only and only while
+ * that bot is not archived. This is the one place a team-space run reads the original, and it
+ * reads nothing but these fields.
+ */
+export async function loadLinkedBotHome(
+  prisma: PrismaClient,
+  link: { linkedFromBotId: string; userId: string },
+): Promise<LinkedBotHome> {
+  return runAsSystem("read the bot behind a link for its owner's run", async () => {
+    const home = await prisma.bot.findFirst({
+      where: {
+        id: link.linkedFromBotId,
+        userId: link.userId,
+        archivedAt: null,
+        linkedFromBotId: null,
+      },
+      select: {
+        instructions: true,
+        modelProvider: true,
+        modelId: true,
+        thinkingLevel: true,
+        disabledBuiltinTools: true,
+      },
+    });
+    if (!home) throw new Error("The bot behind this link is no longer available");
+    return home;
+  });
+}
+
+/**
+ * The bot as a run sees it: a linked bot answers with the persona and model of the bot behind
+ * its link and never rewrites that bot's instructions; any other bot is returned as it is.
+ */
+export async function withLinkedBotHome<
+  T extends { linkedFromBotId: string | null; userId: string; selfUpdateInstructions: boolean },
+>(prisma: PrismaClient, bot: T): Promise<T> {
+  if (!bot.linkedFromBotId) return bot;
+  const home = await loadLinkedBotHome(prisma, {
+    linkedFromBotId: bot.linkedFromBotId,
+    userId: bot.userId,
+  });
+  return { ...bot, ...home, selfUpdateInstructions: false };
 }
