@@ -1317,6 +1317,10 @@ msgstr ""
 msgid "Claude subscription"
 msgstr ""
 
+#: src/pages/shell/computer-panel.tsx
+msgid "Clean up"
+msgstr ""
+
 #: src/components/AskCard.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Clear"
@@ -1502,6 +1506,10 @@ msgstr "电脑"
 #: src/pages/shell/use-computer.tsx
 msgid "Computer failed to boot"
 msgstr "电脑启动失败"
+
+#: src/pages/shell/computer-panel.tsx
+msgid "Computer is {percent}% full"
+msgstr ""
 
 #: src/pages/shell/computer-overlay.tsx
 msgid "Computer is asleep"
@@ -2577,6 +2585,7 @@ msgstr "正在断开…"
 #: src/components/ComputerUpdateProgress.tsx
 #: src/components/PasskeyOffer.tsx
 #: src/components/teach/TeachComputerOverlay.tsx
+#: src/pages/shell/computer-panel.tsx
 #: src/pages/shell/message-cards.tsx
 msgid "Dismiss"
 msgstr "忽略"
@@ -6564,6 +6573,10 @@ msgstr "你的 Anthropic"
 
 #: src/pages/GroupPanel.tsx
 msgid "Your bots"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Your computer's disk is nearly full. Free up space by removing build output and caches you no longer need."
 msgstr ""
 
 #: src/pages/SpaceSettingOverrides.tsx

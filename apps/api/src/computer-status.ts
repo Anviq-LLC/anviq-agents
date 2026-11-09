@@ -1,4 +1,9 @@
-import { computerSupportsTerminal, computerSupportsUpdate } from "@anviq/adapters";
+import {
+  computerSupportsTerminal,
+  computerSupportsUpdate,
+  DISK_WARNING_PERCENT,
+  diskUsedPercent,
+} from "@anviq/adapters";
 import type { ComputerStatus } from "@anviq/contracts";
 import { ACTIVE_RUN_STATUSES, computerScreenSize } from "@anviq/core";
 import type { PrismaClient } from "@anviq/db";
@@ -60,6 +65,9 @@ export function toComputerStatus(
     controlRunId?: string | null;
     homeRevision: string;
     maintenanceId?: string | null;
+    diskUsedBytes?: bigint | null;
+    diskFreeBytes?: bigint | null;
+    diskDismissedPercent?: number | null;
   } | null,
   busyBotName: string | null = null,
 ): ComputerStatus {
@@ -76,6 +84,11 @@ export function toComputerStatus(
         : "stopped";
   const screen = computerScreenSize(computer?.kind);
   const kind = (computer?.kind ?? "fake") as ComputerStatus["kind"];
+  const diskPercent = computer ? diskUsedPercent(computer) : null;
+  const diskFull =
+    diskPercent !== null &&
+    diskPercent >= DISK_WARNING_PERCENT &&
+    diskPercent > (computer?.diskDismissedPercent ?? 0);
   return {
     botId,
     mode: computer?.scope === "dedicated" ? "dedicated" : "team",
@@ -91,5 +104,6 @@ export function toComputerStatus(
     busyBotName,
     canUpdate: computerSupportsUpdate(kind),
     terminalAvailable: computerSupportsTerminal(kind),
+    ...(diskFull ? { diskFullPercent: diskPercent } : {}),
   };
 }

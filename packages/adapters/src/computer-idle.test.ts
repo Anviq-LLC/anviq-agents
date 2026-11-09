@@ -198,7 +198,7 @@ describe("sandbox idle", () => {
     await sleepComputerIfIdle(harness.deps, harness.computer.id);
 
     expect(harness.home.commit).toHaveBeenCalledOnce();
-    expect(harness.sandbox.execute).toHaveBeenCalledTimes(2);
+    expect(backgroundProbes(harness)).toHaveLength(2);
     expect(harness.sandbox.stop).not.toHaveBeenCalled();
     expect(harness.sandbox.keepAlive).toHaveBeenCalledOnce();
     expect(harness.jobs.enqueue).toHaveBeenCalledOnce();
@@ -210,8 +210,21 @@ describe("sandbox idle", () => {
     await sleepComputerIfIdle(harness.deps, harness.computer.id);
 
     expect(harness.sandbox.inspectBackgroundWork).toHaveBeenCalledTimes(2);
-    expect(harness.sandbox.execute).not.toHaveBeenCalled();
+    expect(backgroundProbes(harness)).toHaveLength(0);
     expect(harness.sandbox.stop).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the disk reading when a home too large to save keeps the computer running", async () => {
+    const harness = idleHarness({ exportError: new WorkspaceTooLargeError("bytes") });
+    harness.prisma.run.findFirst.mockResolvedValue(null);
+
+    await sleepComputerIfIdle(harness.deps, harness.computer.id);
+
+    expect(harness.prisma.computer.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { diskUsedBytes: 91n * 1024n, diskFreeBytes: 9n * 1024n, state: "running" },
+      }),
+    );
   });
 
   it("checkpoints before suspending a stable idle computer", async () => {
@@ -233,6 +246,8 @@ describe("sandbox idle", () => {
         updatedAt: expect.any(Date),
       },
       data: {
+        diskUsedBytes: 91n * 1024n,
+        diskFreeBytes: 9n * 1024n,
         state: "suspended",
         runningSince: null,
         controlHolder: "none",
@@ -1372,6 +1387,13 @@ describe("e2b create options", () => {
   });
 });
 
+/** The idle checks that ask whether background work is running, not the disk reading beside the save. */
+function backgroundProbes(harness: { sandbox: { execute: { mock: { calls: unknown[][] } } } }) {
+  return harness.sandbox.execute.mock.calls.filter(
+    ([, request]) => (request as { argv?: string[] } | undefined)?.argv?.[0] !== "df",
+  );
+}
+
 function idleHarness(
   options: {
     backgroundWorkProbeCode?: number;
@@ -1446,8 +1468,16 @@ function idleHarness(
   const sandbox = {
     billsWhileRunning:
       options.billsWhileRunning === undefined ? undefined : vi.fn(() => options.billsWhileRunning),
-    execute: vi.fn(async function* () {
+    execute: vi.fn(async function* (_computer: unknown, request: { argv?: string[] }) {
       if (options.probeError) throw options.probeError;
+      if (request?.argv?.[0] === "df") {
+        yield {
+          type: "stdout",
+          data: "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/vda1 100 91 9 91% /home\n",
+        } as const;
+        yield { type: "exit", code: 0 } as const;
+        return;
+      }
       const code = backgroundWorkProbeCodes.shift() ?? options.backgroundWorkProbeCode ?? 1;
       if (code === 1 && !options.backgroundWorkProbeFailed) {
         yield { type: "stdout", data: "anviq-background-idle\n" } as const;

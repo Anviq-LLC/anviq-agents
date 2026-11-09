@@ -213,6 +213,7 @@ describeWithDatabase("API authorization and resource isolation", () => {
       ["computer/readFile", { botId: "missing-bot", path: "MEMORY.md" }],
       ["computer/screenUrl", { botId: "missing-bot" }],
       ["computer/heartbeat", { botId: "missing-bot" }],
+      ["computer/dismissDiskWarning", { botId: "missing-bot" }],
       ["memory/list", {}],
       ["memory/update", { documentId: "missing-memory", content: "Nope" }],
       ["memory/exportMarkdown", {}],
