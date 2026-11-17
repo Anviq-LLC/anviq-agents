@@ -1,9 +1,10 @@
-import type { Bot, Group } from "@anviq/contracts";
+import type { Bot, Group, LinkableBot } from "@anviq/contracts";
 import { GROUP_MEMBER_MAX, GROUP_MEMBER_MIN, GROUP_NAME_MAX_LENGTH } from "@anviq/contracts";
 import { BotAvatar, Button, Checkbox, Input } from "@anviq/ui-web";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { rpc } from "../lib/rpc";
 import { errorText } from "../lib/user-error";
 import { DeleteItemDialog } from "./shell/dialogs";
 
@@ -21,14 +22,69 @@ function sameMembers(left: readonly string[], right: readonly string[]) {
   return left.every((id) => rightIds.has(id));
 }
 
+/** The person's own bots from their other spaces, which a team group can take in. */
+function useLinkableBots(enabled = true) {
+  const [linkable, setLinkable] = useState<LinkableBot[]>([]);
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    void rpc.bots
+      .linkable()
+      .then((list) => {
+        if (!cancelled) setLinkable(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled]);
+  return linkable;
+}
+
+type PickerRow = {
+  id: string;
+  name: string;
+  title: string;
+  color: string;
+  status?: Bot["status"];
+  /** Where a bot from another space lives, and the id it already has in this one. */
+  home?: { space: string; linkedBotId: string | null };
+};
+
+/** A bot from another space is picked by its link once it has one. */
+const pickId = (row: PickerRow) => row.home?.linkedBotId ?? row.id;
+
+function toPickerRows(bots: readonly Bot[], linkable: readonly LinkableBot[]): PickerRow[] {
+  return [
+    ...bots
+      .filter((bot) => !bot.archivedAt)
+      .map((bot) => ({
+        id: bot.id,
+        name: bot.name,
+        title: bot.title,
+        color: bot.color,
+        status: bot.status,
+      })),
+    ...linkable.map((bot) => ({
+      id: bot.id,
+      name: bot.name,
+      title: bot.title,
+      color: bot.color,
+      home: { space: bot.spaceName, linkedBotId: bot.linkedBotId },
+    })),
+  ];
+}
+
 function MemberPicker({
   bots,
+  linkable = [],
   selected,
   onChange,
   onOpenBot,
   initiallyExpanded = false,
 }: {
   bots: Bot[];
+  linkable?: LinkableBot[];
   selected: string[];
   onChange: (selected: string[]) => void;
   onOpenBot?: (botId: string) => void;
@@ -41,17 +97,20 @@ function MemberPicker({
   // Every bot ever picked this session stays listed when collapsed, so an
   // unchecked member remains re-checkable until the form is saved.
   const [everPicked, setEverPicked] = useState<ReadonlySet<string>>(() => new Set(selected));
-  const selectable = useMemo(() => bots.filter((bot) => !bot.archivedAt), [bots]);
+  const selectable = useMemo(() => toPickerRows(bots, linkable), [bots, linkable]);
+  const isPicked = (row: PickerRow) => selected.includes(pickId(row));
   // The filter field only exists in the expanded view; never let a stale
   // query hide members when the list is collapsed.
   const needle = expanded ? query.trim().toLowerCase() : "";
   const visible = useMemo(() => {
-    const base = expanded ? selectable : selectable.filter((bot) => everPicked.has(bot.id));
+    const base = expanded
+      ? selectable
+      : selectable.filter((bot) => everPicked.has(pickId(bot)) || isPicked(bot));
     if (!needle) return base;
     return base.filter(
       (bot) => bot.name.toLowerCase().includes(needle) || bot.title.toLowerCase().includes(needle),
     );
-  }, [expanded, selectable, everPicked, needle]);
+  }, [expanded, selectable, everPicked, needle, selected]);
 
   function toggle(botId: string) {
     if (selected.includes(botId)) {
@@ -96,7 +155,7 @@ function MemberPicker({
       ) : null}
       <div id={listId} className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto">
         {visible.map((bot) => {
-          const checked = selected.includes(bot.id);
+          const checked = isPicked(bot);
           return (
             <div
               key={bot.id}
@@ -106,12 +165,15 @@ function MemberPicker({
             >
               <button
                 type="button"
-                onClick={() => onOpenBot?.(bot.id)}
+                onClick={() => (bot.home ? toggle(pickId(bot)) : onOpenBot?.(bot.id))}
                 className="flex min-w-0 flex-1 items-center gap-3 text-start"
               >
                 <BotAvatar color={bot.color} identity={bot.id} size={32} status={bot.status} />
                 <span className="flex-1 text-[15px] text-foreground" dir="auto">
                   {bot.name}
+                  {bot.home ? (
+                    <span className="ms-2 text-[13px] text-muted-foreground">{bot.home.space}</span>
+                  ) : null}
                 </span>
               </button>
               <Checkbox
@@ -119,7 +181,7 @@ function MemberPicker({
                 aria-label={
                   checked ? t`Remove ${bot.name} from the group` : t`Add ${bot.name} to the group`
                 }
-                onCheckedChange={() => toggle(bot.id)}
+                onCheckedChange={() => toggle(pickId(bot))}
               />
             </div>
           );
@@ -147,6 +209,7 @@ export function CreateGroupForm({
 }) {
   const { t } = useLingui();
   const nameId = useId();
+  const linkable = useLinkableBots();
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -199,6 +262,7 @@ export function CreateGroupForm({
       </label>
       <MemberPicker
         bots={bots}
+        linkable={linkable}
         selected={selected}
         onChange={setSelected}
         onOpenBot={onOpenBot}
@@ -220,6 +284,7 @@ function PeoplePicker({
   group,
   people,
   bots = [],
+  linkable = [],
   onShare,
   onSetMyBots,
   onLeave,
@@ -228,6 +293,7 @@ function PeoplePicker({
   people: Array<{ userId: string; name: string }>;
   /** The reader's own bots, for a guest to bring into the chat. */
   bots?: Bot[];
+  linkable?: LinkableBot[];
   onShare?: (userIds: string[]) => Promise<void>;
   onSetMyBots?: (botIds: string[]) => Promise<void>;
   onLeave?: () => Promise<void>;
@@ -241,6 +307,8 @@ function PeoplePicker({
   // A guest sees the people already in the chat; the host sees everyone in the space.
   const listed = manage ? people : guests;
   if (listed.length === 0 && manage) return null;
+  const myBots = toPickerRows(bots, linkable);
+  const ownIds = new Set(myBots.map(pickId));
 
   async function run(work: () => Promise<void>) {
     setBusy(true);
@@ -292,45 +360,47 @@ function PeoplePicker({
           </div>
         ))}
       </div>
-      {!manage && onSetMyBots && bots.length > 0 ? (
+      {!manage && onSetMyBots && myBots.length > 0 ? (
         <div className="mt-5">
           <span className="text-sm text-muted-foreground">
             <Trans>Your bots</Trans>
           </span>
           <div className="mt-2 space-y-1">
-            {bots
-              .filter((bot) => !bot.archivedAt)
-              .map((bot) => {
-                const inChat = group.members.some((member) => member.botId === bot.id);
-                return (
-                  <div
-                    key={bot.id}
-                    className="flex w-full items-center rounded-xl px-2.5 py-2.5 hover:bg-accent"
-                  >
-                    <span className="flex-1 text-[15px] text-foreground" dir="auto">
-                      {bot.name}
-                    </span>
-                    <Checkbox
-                      checked={inChat}
-                      disabled={busy}
-                      aria-label={
-                        inChat
-                          ? t`Remove ${bot.name} from the chat`
-                          : t`Add ${bot.name} to the chat`
-                      }
-                      onCheckedChange={() => {
-                        const mine = new Set(
-                          group.members
-                            .filter((member) => bots.some((own) => own.id === member.botId))
-                            .map((member) => member.botId),
-                        );
-                        if (!mine.delete(bot.id)) mine.add(bot.id);
-                        void run(() => onSetMyBots([...mine]));
-                      }}
-                    />
-                  </div>
-                );
-              })}
+            {myBots.map((bot) => {
+              const id = pickId(bot);
+              const inChat = group.members.some((member) => member.botId === id);
+              return (
+                <div
+                  key={bot.id}
+                  className="flex w-full items-center rounded-xl px-2.5 py-2.5 hover:bg-accent"
+                >
+                  <span className="flex-1 text-[15px] text-foreground" dir="auto">
+                    {bot.name}
+                    {bot.home ? (
+                      <span className="ms-2 text-[13px] text-muted-foreground">
+                        {bot.home.space}
+                      </span>
+                    ) : null}
+                  </span>
+                  <Checkbox
+                    checked={inChat}
+                    disabled={busy}
+                    aria-label={
+                      inChat ? t`Remove ${bot.name} from the chat` : t`Add ${bot.name} to the chat`
+                    }
+                    onCheckedChange={() => {
+                      const mine = new Set(
+                        group.members
+                          .filter((member) => ownIds.has(member.botId))
+                          .map((member) => member.botId),
+                      );
+                      if (!mine.delete(id)) mine.add(id);
+                      void run(() => onSetMyBots([...mine]));
+                    }}
+                  />
+                </div>
+              );
+            })}
           </div>
         </div>
       ) : null}
@@ -377,6 +447,7 @@ export function GroupSettings({
 }) {
   const { t } = useLingui();
   const nameId = useId();
+  const linkable = useLinkableBots();
   const [name, setName] = useState(group.name);
   const [selected, setSelected] = useState(group.members.map((member) => member.botId));
   // The panel can open on a cached group. A refreshed one replaces whatever was not edited, so a
@@ -468,6 +539,7 @@ export function GroupSettings({
           group={group}
           people={people}
           bots={bots}
+          linkable={linkable}
           onSetMyBots={onSetMyBots}
           onLeave={onLeave}
         />
@@ -485,6 +557,7 @@ export function GroupSettings({
           </label>
           <MemberPicker
             bots={bots}
+            linkable={linkable}
             selected={selected}
             onChange={setSelected}
             onOpenBot={onOpenBot}
