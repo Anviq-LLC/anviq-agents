@@ -1,11 +1,9 @@
 name: Model catalog bump
 
 # The model catalog is compiled into the pinned @earendil-works/pi-* packages.
-# A weekly bump keeps new models (and dropped/renamed ones) flowing in as a
-# reviewable PR instead of a manual dependency chore.
+# Run this by hand to bump them; it does not run on a schedule because its install step
+# re-resolves unrelated dependencies and fails.
 on:
-  schedule:
-    - cron: "17 6 * * 1"
   workflow_dispatch:
 
 # The update job installs and runs unreviewed dependency code, so it gets no
@@ -60,6 +58,11 @@ jobs:
             echo "ai_version=$(node -p "require('./$pkg').dependencies['@earendil-works/pi-ai']")" >> "$GITHUB_OUTPUT"
             echo "core_version=$(node -p "require('./$pkg').dependencies['@earendil-works/pi-agent-core']")" >> "$GITHUB_OUTPUT"
           fi
+      - name: Generate the database client
+        if: steps.changed.outputs.changed == 'true'
+        run: pnpm db:generate
+        env:
+          DATABASE_URL: postgres://anviq:anviq@127.0.0.1:5433/anviq
       - name: Typecheck and test adapters
         if: steps.changed.outputs.changed == 'true'
         run: |
