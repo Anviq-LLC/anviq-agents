@@ -42,6 +42,8 @@ import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Check, Copy } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { AccountMenu } from "../components/AccountMenu";
+import { FoundModelPicker } from "../components/FoundModelPicker";
 import {
   ModelPreflightFeedback,
   modelPreflightTestingLabel,
@@ -60,10 +62,10 @@ import {
   unavailableSelectedModel,
 } from "../lib/model-connection-preflight";
 import { rpc } from "../lib/rpc";
+import { useSignOut } from "../lib/sign-out";
 import { useModelOAuthSignIn } from "../lib/use-model-oauth-signin";
 import { errorText } from "../lib/user-error";
 import { CompatibleKeyField } from "./model-settings/compatible-key-field";
-import { OnboardingImport } from "./onboarding-import";
 
 const CUSTOM_MODEL_OPTION = "__anviq_custom_model__";
 /** Anviq Agents credits sit among the providers as the one choice that needs no account of its own. */
@@ -107,7 +109,6 @@ async function createOrReuseFirstBot(): Promise<{ id: string }> {
   try {
     const created = await rpc.bots.create({
       name: FIRST_BOT_NAME,
-      title: "",
       description: "",
       instructions: "",
       notifyOnFinish: true,
@@ -176,14 +177,8 @@ export function OnboardingPage() {
   const [modelProbe] = useState(() => createModelProbe(setProbe));
   const resetOpenAiCompatibleProbe = modelProbe.reset;
   const createStartedRef = useRef(false);
-  // An imported agent replaces Chief as the first bot.
-  const [importing, setImporting] = useState(false);
-  const importedBotRef = useRef<{ id: string } | null>(null);
-  // Mirrors importedBotRef for rendering; the ref serves the async flow.
-  const [importedBotId, setImportedBotId] = useState<string | null>(null);
-  // Another tab or device made the first bot before the import could.
-  const [notImported, setNotImported] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { signingOut, logOut } = useSignOut("/sign-in", setError);
   const [notice, setNotice] = useState<string | null>(null);
   const [preflightTesting, setPreflightTesting] = useState(false);
   const [preflightTarget, setPreflightTarget] = useState<"api-key" | "compatible" | null>(null);
@@ -243,7 +238,11 @@ export function OnboardingPage() {
     for (const entry of catalog) {
       if (!seen.has(entry.provider)) seen.set(entry.provider, entry);
     }
-    return popularModelProvidersFirst([...seen.values()], (entry) => entry.provider);
+    return popularModelProvidersFirst(
+      [...seen.values()],
+      (entry) => entry.provider,
+      (entry) => entry.providerName ?? entry.provider,
+    );
   }, [catalog]);
 
   const modelsForProvider = useMemo(
@@ -273,8 +272,7 @@ export function OnboardingPage() {
       cloudflareRoutingReady &&
       (isOpenAiCompatible ? openAiCompatibleReady : acceptsKey && apiKey.trim()),
   );
-  const otherModelLabel = t`Other model…`;
-  // Subscriptions and the common API providers first; every other provider follows.
+  // Subscriptions and the common API providers first; every other provider follows by name.
   const providerOptions = useMemo(() => {
     const byId = new Map(providers.map((entry) => [entry.provider, entry]));
     // Beside the subscriptions, the key-based options say API.
@@ -290,16 +288,20 @@ export function OnboardingPage() {
         label: optionLabel(option.provider, option.auth),
       })),
     ];
-    const rest = providers
-      .filter(
-        (entry) => !MAIN_PROVIDER_OPTIONS.some((option) => option.provider === entry.provider),
-      )
-      .flatMap((entry) => {
-        const item = { value: entry.provider, label: entry.providerName ?? entry.provider };
-        return entry.provider === OPENAI_COMPATIBLE_PROVIDER_ID
-          ? [item, { value: "ollama-preset", label: t`Ollama Cloud` }]
-          : [item];
-      });
+    const rest = popularModelProvidersFirst(
+      providers
+        .filter(
+          (entry) => !MAIN_PROVIDER_OPTIONS.some((option) => option.provider === entry.provider),
+        )
+        .flatMap((entry) => {
+          const item = { value: entry.provider, label: entry.providerName ?? entry.provider };
+          return entry.provider === OPENAI_COMPATIBLE_PROVIDER_ID
+            ? [item, { value: "ollama-preset", label: t`Ollama Cloud` }]
+            : [item];
+        }),
+      (option) => option.value,
+      (option) => option.label,
+    );
     return { main, rest };
   }, [billingEnabled, providers, t]);
   // Base UI Select.Value only resolves labels when Root gets `items`.
@@ -310,13 +312,6 @@ export function OnboardingPage() {
   const modelItems = useMemo(
     () => modelsForProvider.map((entry) => ({ value: entry.id, label: entry.label })),
     [modelsForProvider],
-  );
-  const probeModelItems = useMemo(
-    () => [
-      ...probeModels.map((id) => ({ value: id, label: id })),
-      { value: CUSTOM_MODEL_OPTION, label: otherModelLabel },
-    ],
-    [otherModelLabel, probeModels],
   );
 
   function invalidatePreflight() {
@@ -539,16 +534,14 @@ export function OnboardingPage() {
     createStartedRef.current = true;
     setError(null);
     try {
-      const imported = importedBotRef.current;
-      const bot = imported ?? (await ensureFirstBot());
+      const bot = await ensureFirstBot();
       // Onboarding continues conversationally in the thread: greeting first,
-      // then the focus choice (immediate for the first bot), which an imported
-      // bot already answered.
+      // then the focus choice (immediate for the first bot).
       const started = await rpc.onboarding
         .start({ botId: bot.id })
         .then(() => true)
         .catch(() => false);
-      if (started && !imported) {
+      if (started) {
         await rpc.onboarding.promptFocus({ botId: bot.id }).catch(() => undefined);
       }
       navigate(`/app/${bot.id}`);
@@ -559,7 +552,7 @@ export function OnboardingPage() {
   }
 
   useEffect(() => {
-    if (step !== "bot" || notImported) return;
+    if (step !== "bot") return;
     void createFirstBot();
   }, [step]);
 
@@ -567,62 +560,10 @@ export function OnboardingPage() {
   if (step === "loading" || (step === "bot" && !error)) return <PageLoading />;
 
   return (
-    <div className="min-h-full bg-background px-6 py-12">
+    <div className="min-h-full bg-background px-6 py-12" data-anviq-surface="onboarding">
+      <AccountMenu signingOut={signingOut} onLogOut={() => void logOut()} />
       <div className="mx-auto w-full max-w-[560px]">
-        {step === "survey" && !importing ? (
-          <>
-            <SignupSurvey
-              onDone={() => {
-                setNotImported(false);
-                setSurveyDone(true);
-              }}
-            />
-            {importedBotId ? null : (
-              <Button
-                variant="link"
-                className="mt-6 h-auto px-0 text-muted-foreground"
-                onClick={() => setImporting(true)}
-              >
-                <Trans>Import an agent</Trans>
-              </Button>
-            )}
-          </>
-        ) : null}
-        {step === "survey" && importing ? (
-          <OnboardingImport
-            firstBot={{
-              lock: withFirstBotLock,
-              existing: async () => findFirstBot(await rpc.bots.list()),
-              spawnKey: FIRST_BOT_SPAWN_KEY,
-            }}
-            onBack={() => setImporting(false)}
-            onDone={(bot, imported) => {
-              if (!imported) {
-                setImporting(false);
-                setNotImported(true);
-                return;
-              }
-              importedBotRef.current = bot;
-              // The survey's own Continue then opens the imported bot, skipping the model
-              // step when the import brought a usable connection.
-              void rpc
-                .me()
-                .then((me) => setAfterSurvey(me.needsModel ? "model" : "bot"))
-                .catch(() => undefined)
-                .finally(() => {
-                  setImportedBotId(bot.id);
-                  setImporting(false);
-                });
-            }}
-          />
-        ) : null}
-        {notImported ? (
-          <div className="mb-8" data-testid="onboarding-not-imported">
-            <p role="alert" className="text-sm text-destructive">
-              <Trans>Your first bot already existed, so the agent was not imported.</Trans>
-            </p>
-          </div>
-        ) : null}
+        {step === "survey" ? <SignupSurvey onDone={() => setSurveyDone(true)} /> : null}
         {step === "model" ? (
           <div>
             <h1 className="text-[32px] font-medium text-foreground">
@@ -716,38 +657,16 @@ export function OnboardingPage() {
                         <Trans>Model</Trans>
                       </span>
                       {probeModels.length && !manualModelId ? (
-                        <Select
+                        <FoundModelPicker
+                          models={probeModels}
                           value={modelId}
-                          onValueChange={(value) => {
-                            if (typeof value !== "string") return;
-                            const next = value;
+                          onChange={(next) => {
                             invalidatePreflight();
-                            if (next === CUSTOM_MODEL_OPTION) {
-                              setManualModelId(true);
-                              setModelId("");
-                            } else {
-                              setManualModelId(false);
-                              setModelId(next);
-                            }
+                            setManualModelId(next === CUSTOM_MODEL_OPTION);
+                            setModelId(next === CUSTOM_MODEL_OPTION ? "" : next);
                           }}
-                          items={probeModelItems}
-                        >
-                          <SelectTrigger aria-label={t`Models from server`} className="mt-2 w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              {probeModels.map((id) => (
-                                <SelectItem key={id} value={id}>
-                                  {id}
-                                </SelectItem>
-                              ))}
-                              <SelectItem value={CUSTOM_MODEL_OPTION}>
-                                <Trans>Other model…</Trans>
-                              </SelectItem>
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
+                          otherValue={CUSTOM_MODEL_OPTION}
+                        />
                       ) : (
                         <Input
                           value={modelId}

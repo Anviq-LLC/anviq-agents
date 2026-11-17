@@ -41,6 +41,7 @@ describe("Android call foreground service", () => {
       de: "values-de",
       nl: "values-nl",
       ja: "values-ja",
+      es: "values-es",
     } as const satisfies Record<(typeof UI_LOCALES)[number], string>;
     const keys = ["anviq_call_channel", "anviq_call_title", "anviq_call_text"];
     for (const locale of UI_LOCALES) {

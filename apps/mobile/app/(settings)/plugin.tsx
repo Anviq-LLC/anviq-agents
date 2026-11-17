@@ -14,7 +14,13 @@ import {
   isCatalogItemConnected,
 } from "@anviq/core";
 import type { NativeStackNavigationOptions } from "expo-router";
-import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import {
+  Redirect,
+  useFocusEffect,
+  useLocalSearchParams,
+  useNavigation,
+  useRouter,
+} from "expo-router";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -31,6 +37,11 @@ import { NativeActionButton } from "../../components/native-action-button";
 import { NativeSymbol } from "../../components/native-symbol";
 import { PluginIcon } from "../../components/plugin-icon";
 import { SkillSymbol } from "../../components/skill-symbol";
+import {
+  reachesOtherSpaces,
+  SpaceAvailabilityPicker,
+  useOwnSpaces,
+} from "../../components/space-availability";
 import { rpc } from "../../lib/api";
 import { useAppForeground } from "../../lib/app-foreground";
 import { mobileTokens } from "../../lib/appearance";
@@ -45,7 +56,13 @@ import { errorText } from "../../lib/user-error";
 
 const SKILLS_SHOWN = 5;
 
-export default function PluginScreen() {
+/** A link without a plugin (an old link, a restored route) lands on Integrations instead. */
+export default function PluginRoute() {
+  const { source, installedSource, name } = useLocalSearchParams<PluginParams>();
+  return source && installedSource && name ? <PluginScreen /> : <Redirect href="/integrations" />;
+}
+
+function PluginScreen() {
   const params = useLocalSearchParams<PluginParams>();
   const navigation = useNavigation();
   const router = useRouter();
@@ -129,6 +146,7 @@ export default function PluginScreen() {
       ? allServers.filter((server) => server.installId === install.id)
       : [];
   const installed = Boolean(install);
+  const everywhere = reachesOtherSpaces(install?.availability, useOwnSpaces().length);
   useEffect(() => {
     if (!loaded || installed) return;
     let cancelled = false;
@@ -187,7 +205,7 @@ export default function PluginScreen() {
       : parts.filter((value) => value !== part);
 
   const confirmRemove = (title: string, onConfirm: () => void) =>
-    Alert.alert(title, undefined, [
+    Alert.alert(everywhere ? t("Remove from every space?") : title, undefined, [
       { text: t("Cancel"), style: "cancel" },
       { text: t("Remove"), style: "destructive", onPress: onConfirm },
     ]);
@@ -252,8 +270,16 @@ export default function PluginScreen() {
   const busy = Boolean(pending);
   const parsed = install ? PluginPreviewSchema.safeParse(install.config) : null;
   const detail = parsed?.success ? parsed.data : preview;
-  // An ignored manifest field loses nothing, so it isn't reported.
-  const notAdded = (detail?.skipped ?? []).filter((entry) => entry.kind !== "unsupported_field");
+  // An ignored manifest field loses nothing, so it isn't reported. A skill left out for repeating
+  // a built-in one says why, since the user still has that skill.
+  const notAdded = [
+    ...(detail?.skipped ?? [])
+      .filter((entry) => entry.kind !== "unsupported_field")
+      .map((entry) => entry.name),
+    ...(detail?.builtinNames ?? []).map((name) =>
+      t("{name} (same name as a built-in skill)", { name }),
+    ),
+  ];
   const connectorCount = detail?.mcpServers.length ?? 0;
   // Without a connector there is nothing to connect, so the page adds the skills instead.
   const skillsOnly = params.skillsOnly === "1";
@@ -380,6 +406,14 @@ export default function PluginScreen() {
         </View>
 
         {description ? <Text style={styles.description}>{description}</Text> : null}
+        {install ? (
+          <SpaceAvailabilityPicker
+            kind="install"
+            id={install.id}
+            availability={install.availability}
+            onChanged={load}
+          />
+        ) : null}
 
         {error ? (
           <View style={styles.errorRow}>
@@ -551,7 +585,7 @@ export default function PluginScreen() {
 
         {notAdded.length ? (
           <Text style={styles.secondary}>
-            {t("Not added: {list}", { list: notAdded.map((entry) => entry.name).join(", ") })}
+            {t("Not added: {list}", { list: notAdded.join(", ") })}
           </Text>
         ) : null}
       </ScrollView>

@@ -1,8 +1,9 @@
 import type { Bot, Group } from "@anviq/contracts";
 import { GROUP_MEMBER_MAX, GROUP_MEMBER_MIN, GROUP_NAME_MAX_LENGTH } from "@anviq/contracts";
-import { BotAvatar, Button, Checkbox, Input } from "@anviq/ui-web";
+import { BotAvatar, Button, Checkbox, Input, SectionHeading } from "@anviq/ui-web";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { X } from "lucide-react";
+import type { ReactNode } from "react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { errorText } from "../lib/user-error";
 import { DeleteItemDialog } from "./shell/dialogs";
@@ -48,9 +49,7 @@ function MemberPicker({
   const visible = useMemo(() => {
     const base = expanded ? selectable : selectable.filter((bot) => everPicked.has(bot.id));
     if (!needle) return base;
-    return base.filter(
-      (bot) => bot.name.toLowerCase().includes(needle) || bot.title.toLowerCase().includes(needle),
-    );
+    return base.filter((bot) => bot.name.toLowerCase().includes(needle));
   }, [expanded, selectable, everPicked, needle]);
 
   function toggle(botId: string) {
@@ -109,7 +108,13 @@ function MemberPicker({
                 onClick={() => onOpenBot?.(bot.id)}
                 className="flex min-w-0 flex-1 items-center gap-3 text-start"
               >
-                <BotAvatar color={bot.color} identity={bot.id} size={32} status={bot.status} />
+                <BotAvatar
+                  avatarSet={bot.avatarSet}
+                  color={bot.color}
+                  identity={bot.id}
+                  size={32}
+                  status={bot.status}
+                />
                 <span className="flex-1 text-[15px] text-foreground" dir="auto">
                   {bot.name}
                 </span>
@@ -223,6 +228,7 @@ export function GroupSettings({
   onClose,
   onOpenBot,
   covered = false,
+  pages,
 }: {
   group: Group;
   bots: Bot[];
@@ -232,6 +238,7 @@ export function GroupSettings({
   onOpenBot?: (botId: string) => void;
   /** A full-screen overlay is on top, so Escape belongs to it. */
   covered?: boolean;
+  pages?: ReactNode;
 }) {
   const { t } = useLingui();
   const nameId = useId();
@@ -266,7 +273,12 @@ export function GroupSettings({
   useEffect(() => {
     if (saving || confirmingDelete || covered) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented && !event.isComposing) {
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        !event.isComposing &&
+        event.keyCode !== 229
+      ) {
         event.preventDefault();
         onClose();
       }
@@ -339,6 +351,14 @@ export function GroupSettings({
       >
         {saving ? <Trans>Saving…</Trans> : <Trans>Save</Trans>}
       </Button>
+      {pages ? (
+        <section className="mt-6">
+          <SectionHeading variant="label" className="mb-2">
+            <Trans>Pages</Trans>
+          </SectionHeading>
+          {pages}
+        </section>
+      ) : null}
       <Button
         variant="destructive"
         className="mt-4 w-full"

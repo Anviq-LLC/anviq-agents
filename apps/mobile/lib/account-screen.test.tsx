@@ -36,6 +36,7 @@ const { element, account } = vi.hoisted(() => ({
     push: vi.fn(),
     approvals: { mode: "ask", enabled: false, skipApprovals: false, checkerAvailable: true },
     rules: [] as { id: string }[],
+    messaging: { enabled: true },
   },
 }));
 
@@ -77,7 +78,34 @@ vi.mock("react-native", () => ({
     }),
   View: element("div"),
 }));
-vi.mock("@expo/ui/community/menu", () => ({ MenuView: element("div") }));
+vi.mock("@expo/ui/community/menu", () => ({
+  MenuView: ({
+    children,
+    actions,
+    onPressAction,
+  }: {
+    children?: ReactNode;
+    actions: Array<{ id: string; title: string }>;
+    onPressAction: (event: { nativeEvent: { event: string } }) => void;
+  }) =>
+    createElement(
+      "div",
+      null,
+      children,
+      actions.map((action) =>
+        createElement(
+          "button",
+          {
+            key: action.id,
+            type: "button",
+            "data-menu-action": action.id,
+            onClick: () => onPressAction({ nativeEvent: { event: action.id } }),
+          },
+          action.title,
+        ),
+      ),
+    ),
+}));
 vi.mock("expo-router", () => {
   const router = { push: account.push, back: () => undefined };
   return {
@@ -153,7 +181,9 @@ vi.mock("./api", () => ({
         ? account.approvals
         : method === "approvalRules/list"
           ? account.rules
-          : {},
+          : method === "messaging/status"
+            ? account.messaging
+            : {},
   ),
   selectedSpaceId: () => "space-1",
   signOut: vi.fn(),
@@ -202,6 +232,7 @@ vi.mock("./passkey", () => ({
   renamePasskey: vi.fn(),
 }));
 vi.mock("./push", () => ({ registerPushToken: vi.fn() }));
+vi.mock("./returning-user", () => ({ forgetSignedIn: vi.fn() }));
 vi.mock("./queued-save", () => ({ createQueuedSave: () => ({ save: vi.fn() }) }));
 vi.mock("./remote-images-preference", () => ({
   getCachedRemoteImagesEnabled: () => true,
@@ -215,6 +246,15 @@ vi.mock("./response-streaming", () => ({
 }));
 vi.mock("./section-name-prompt", () => ({ promptSectionName: vi.fn() }));
 vi.mock("./sso", () => ({ continueWithSso: vi.fn() }));
+const trusted = vi.hoisted(() => ({
+  sites: [] as string[],
+  remove: vi.fn(async (_site: string) => undefined),
+}));
+vi.mock("./trusted-link-sites", () => ({
+  loadTrustedLinkSites: vi.fn(async () => undefined),
+  removeTrustedLinkSite: trusted.remove,
+  useTrustedLinkSites: () => trusted.sites,
+}));
 vi.mock("./ui-locale", () => ({ UI_LOCALE_LABELS: { en: "English" } }));
 vi.mock("./user-error", () => ({ errorText: (_: unknown, fallback: string) => fallback }));
 
@@ -236,6 +276,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   account.me = { userId: "user-1", name: "Tester", email: "tester@example.test" };
   account.rules = [];
+  account.messaging = { enabled: true };
   vi.mocked(fetchAccountSecurity).mockResolvedValue(security());
 });
 
@@ -452,6 +493,26 @@ it.each([false, true])(
   },
 );
 
+it("lists trusted link sites only when there is one, each with a remove action", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root?.render(<Account />));
+  expect(container.querySelector('[aria-label="Trusted sites"]')).toBeNull();
+
+  trusted.sites = ["alice.github.io", "example.com"];
+  await act(async () => root?.render(<Account />));
+  const group = container.querySelector('[aria-label="Trusted sites"]');
+  expect(group?.textContent).toContain("alice.github.io");
+  expect(group?.textContent).toContain("example.com");
+  const removes = group?.querySelectorAll<HTMLButtonElement>('[data-menu-action="remove"]');
+  expect(removes).toHaveLength(2);
+  await act(async () => removes?.[1]?.click());
+  expect(trusted.remove).toHaveBeenCalledWith("example.com");
+  trusted.sites = [];
+});
+
 it("shows the approval mode as the Approvals row's value, with Rules only once there are some", async () => {
   let view = await renderAccount();
   const approvals = view.button("Approvals")!;
@@ -475,4 +536,12 @@ it("shows the approval mode as the Approvals row's value, with Rules only once t
   expect(view.button("Rules")!.dataset.value).toBe("2");
   await view.press("Rules");
   expect(account.push).toHaveBeenCalledWith("/approvals");
+});
+
+it("hides Messaging when no chat app is connected to the server", async () => {
+  account.messaging = { enabled: false };
+  const view = await renderAccount();
+  const titles = Array.from(view.screen.querySelectorAll("[data-row]"), (row) => row.textContent);
+  expect(titles).toContain("Skills");
+  expect(titles).not.toContain("Messaging");
 });

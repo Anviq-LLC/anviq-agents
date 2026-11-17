@@ -10,7 +10,7 @@ import type { MessageBlock } from "@anviq/contracts";
 import { ATTACHMENT_MAX_COUNT, AutomatedSenderPoliciesSchema } from "@anviq/contracts";
 import { botMessageMaxHops, messageBlockForArtifact, promptTextForAttachments } from "@anviq/core";
 import type { PrismaClient, ThreadEvents } from "@anviq/db";
-import { clearEndedRunState } from "@anviq/db";
+import { clearEndedRunState, teamChatRunClientNonce } from "@anviq/db";
 import { getLogger } from "@anviq/logging";
 import type { MessagingReceipts } from "./messaging-receipts.js";
 import type { TeamChatEngagementJudge } from "./team-chat-judge.js";
@@ -1086,7 +1086,8 @@ export class TeamChatBridge {
       const conversation = messages[0]?.externalConversation;
       if (!conversation) continue;
       const ambientEnabled = conversation.teamChatAmbientEnabled ?? policy.teamChatAmbientEnabled;
-      const rules = conversation.teamChatRules ?? policy.teamChatRules;
+      // Blank room instructions follow the bot, as the settings screens show them.
+      const rules = conversation.teamChatRules || policy.teamChatRules;
       const parsedPolicies = AutomatedSenderPoliciesSchema.safeParse(
         conversation.automatedSenderPolicies,
       );
@@ -1362,7 +1363,7 @@ export class TeamChatBridge {
       blocks: [{ kind: "text", text: prompt }, ...fileBlocks],
       prompt,
       trigger: "messaging",
-      clientNonce: `teamchat:${this.deps.providerId}:${message.providerEventId}`,
+      clientNonce: teamChatRunClientNonce(this.deps.providerId, message.providerEventId),
       linkMessageToRun: true,
       allowParallelRun: true,
     });

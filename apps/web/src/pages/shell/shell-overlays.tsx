@@ -1,4 +1,11 @@
-import type { Bot, Me, Space, SpaceMemoryConfig, UsageSummary } from "@anviq/contracts";
+import type {
+  Bot,
+  BotAvatarSet,
+  Me,
+  Space,
+  SpaceMemoryConfig,
+  UsageSummary,
+} from "@anviq/contracts";
 import { writeSaved } from "@anviq/core/query";
 import { useQuery } from "@tanstack/react-query";
 import type { RefObject } from "react";
@@ -85,6 +92,8 @@ export function SettingsOverlays({
   spaces,
   renameSpace,
   removeSpace,
+  refreshSpaces,
+  openAgentImport,
   alive,
   user,
   refetchSession,
@@ -106,6 +115,8 @@ export function SettingsOverlays({
   spaces: Space[];
   renameSpace: (spaceId: string, name: string) => Promise<void>;
   removeSpace: (spaceId: string) => Promise<void>;
+  refreshSpaces: () => Promise<void>;
+  openAgentImport: () => void;
   alive: RefObject<boolean>;
   user: { name?: string | null; email?: string } | undefined;
   refetchSession: () => Promise<unknown>;
@@ -116,7 +127,7 @@ export function SettingsOverlays({
   peerConversation: { peerBotId: string; peerBotName: string } | null;
   setPeerConversation: (peer: null) => void;
   active: Bot | undefined;
-  peerBot: (botId: string) => { color: string } | undefined;
+  peerBot: (botId: string) => { color: string; avatarSet?: BotAvatarSet } | undefined;
 }) {
   // Read when Usage opens; a reopened Usage shows the last summary while it refreshes.
   const usageQuery = useQuery({ ...queries.usage.summary.queryOptions(), enabled: false });
@@ -147,6 +158,7 @@ export function SettingsOverlays({
           onSectionChange={(section) => setOverlay({ ...overlay, section })}
           billingEnabled={bootstrapMe?.billingEnabled === true}
           sandboxProvider={bootstrapMe?.sandboxProvider}
+          canConfigureComputers={bootstrapMe?.isAdmin === true}
           onSandboxProviderChange={(sandboxProvider) =>
             setBootstrapMe((prev) => (prev ? { ...prev, sandboxProvider } : prev))
           }
@@ -156,6 +168,11 @@ export function SettingsOverlays({
           onTimezoneChange={async (timezone) => {
             const nextMe = await rpc.preferences.update({ timezone });
             setBootstrapMe((prev) => (prev ? { ...prev, timezone: nextMe.timezone } : nextMe));
+          }}
+          onAccountImported={refreshSpaces}
+          onImportAgent={() => {
+            setOverlay(null);
+            openAgentImport();
           }}
           memoryConfig={memoryConfig}
           onMemoryConfigChange={(config) => {
@@ -180,9 +197,11 @@ export function SettingsOverlays({
           botId={active.id}
           botName={active.name}
           botColor={active.color}
+          botAvatarSet={active.avatarSet}
           peerBotId={peerConversation.peerBotId}
           peerBotName={peerConversation.peerBotName}
           peerBotColor={peerBot(peerConversation.peerBotId)?.color ?? FALLBACK_BOT_COLOR}
+          peerBotAvatarSet={peerBot(peerConversation.peerBotId)?.avatarSet}
           onClose={() => setPeerConversation(null)}
         />
       ) : null}

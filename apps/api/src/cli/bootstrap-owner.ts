@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { contentKeyProviderFromEnv } from "@anviq/adapters";
+import { contentKeyProviderFromEnv, unwrapEnvFromKeyManager } from "@anviq/adapters";
 import { createAuth } from "@anviq/auth";
 import { bootstrapUserSpace, createDb, runAsSystem } from "@anviq/db";
 
@@ -9,6 +9,7 @@ function required(name: string): string {
   return value;
 }
 
+await unwrapEnvFromKeyManager();
 const { prisma, pool } = createDb(required("DATABASE_URL"), {
   keyProvider: contentKeyProviderFromEnv(),
 });

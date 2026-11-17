@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { connectMcpOauth } from "../../lib/mcp-connect";
 import { rpc } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
+import { AvailabilityControl, reachesOtherSpaces, useOwnSpaces } from "./space-availability";
 
 export type PluginSelection = {
   source: string;
@@ -181,6 +182,7 @@ export function PluginDetail({
   const [noAuth, setNoAuth] = useState(new Set<string>());
   const [attempt, setAttempt] = useState(0);
   const live = useRef(true);
+  const spaceCount = useOwnSpaces().length;
   useEffect(() => {
     live.current = true;
     return () => {
@@ -309,8 +311,14 @@ export function PluginDetail({
     }
   }
 
-  // An ignored manifest field loses nothing, so it isn't reported.
-  const notAdded = (detail?.skipped ?? []).filter((entry) => entry.kind !== "unsupported_field");
+  // An ignored manifest field loses nothing, so it isn't reported. A skill left out for repeating
+  // a built-in one says why, since the user still has that skill.
+  const notAdded = [
+    ...(detail?.skipped ?? [])
+      .filter((entry) => entry.kind !== "unsupported_field")
+      .map((entry) => entry.name),
+    ...(detail?.builtinNames ?? []).map((name) => t`${name} (same name as a built-in skill)`),
+  ];
   const prefix = `${detail?.name ?? ""}: `;
   const skills = detail?.skills ?? [];
   const shownSkills = allSkills ? skills : skills.slice(0, SKILLS_SHOWN);
@@ -321,6 +329,7 @@ export function PluginDetail({
   const headerOn = parts.includes(headerPart);
   const skillsOn = parts.includes("skills");
   const busy = Boolean(pending);
+  const everywhere = reachesOtherSpaces(install?.availability, spaceCount);
   const ready = Boolean(detail) && (Boolean(install) || Boolean(preview));
 
   function headerAction() {
@@ -352,7 +361,13 @@ export function PluginDetail({
               void setParts("header", toggle(headerPart, false), t`Could not remove plugin`)
             }
           >
-            {pending === "header" ? <Trans>Removing…</Trans> : <Trans>Confirm removal</Trans>}
+            {pending === "header" ? (
+              <Trans>Removing…</Trans>
+            ) : everywhere ? (
+              <Trans>Remove from every space?</Trans>
+            ) : (
+              <Trans>Confirm removal</Trans>
+            )}
           </Button>
         </>
       ) : (
@@ -426,6 +441,15 @@ export function PluginDetail({
         <p className="text-[15px] leading-6 text-muted-foreground">
           {detail?.description || selection.description}
         </p>
+      ) : null}
+
+      {install ? (
+        <AvailabilityControl
+          kind="install"
+          id={install.id}
+          availability={install.availability}
+          onChanged={onChanged}
+        />
       ) : null}
 
       {error ? (
@@ -630,7 +654,7 @@ export function PluginDetail({
 
       {notAdded.length ? (
         <p className="px-1 text-[13px] text-muted-foreground">
-          <Trans>Not added: {notAdded.map((entry) => entry.name).join(", ")}</Trans>
+          <Trans>Not added: {notAdded.join(", ")}</Trans>
         </p>
       ) : null}
     </div>

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  canChooseOwnComputer,
   classifySandboxProvider,
   computersAreUnavailable,
   sandboxCheckFailureMessage,
   sandboxEnvGuidanceLines,
   sandboxEnvGuidanceText,
+  sandboxProviderLabel,
 } from "./computer-sandbox.js";
 
 describe("computersAreUnavailable", () => {
@@ -20,12 +22,25 @@ describe("computersAreUnavailable", () => {
   });
 });
 
+describe("canChooseOwnComputer", () => {
+  it("offers an account its own desktop wherever Settings routes computers", () => {
+    expect(canChooseOwnComputer("docker")).toBe(true);
+    expect(canChooseOwnComputer("test-desktop")).toBe(true);
+    expect(canChooseOwnComputer("none")).toBe(false);
+    expect(canChooseOwnComputer("desktop")).toBe(false);
+    expect(canChooseOwnComputer("fake")).toBe(false);
+    expect(canChooseOwnComputer(null)).toBe(false);
+  });
+});
+
 describe("classifySandboxProvider", () => {
   it("classifies none, docker, and hosted providers", () => {
     expect(classifySandboxProvider("none")).toBe("none");
     expect(classifySandboxProvider(null)).toBe("none");
     expect(classifySandboxProvider("docker")).toBe("docker");
     expect(classifySandboxProvider("e2b")).toBe("hosted");
+    expect(classifySandboxProvider("novita")).toBe("hosted");
+    expect(sandboxProviderLabel("novita")).toBe("Novita");
   });
 });
 
@@ -38,6 +53,8 @@ describe("sandboxEnvGuidanceText", () => {
       "SANDBOX_PROVIDER=docker",
     ]);
     expect(text).toContain("# SANDBOX_PROVIDER=e2b");
+    expect(text).toContain("# SANDBOX_PROVIDER=novita");
+    expect(text).toContain("# Build template: pnpm sandbox:novita-template");
     expect(text).toContain("# SANDBOX_PROVIDER=daytona");
     expect(text).toContain("# SANDBOX_PROVIDER=boat");
   });

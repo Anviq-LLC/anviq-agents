@@ -1,5 +1,5 @@
 import type { ReplyPreview } from "@anviq/contracts";
-import { replyLabel } from "@anviq/core";
+import { isPageOriginReply, replyLabel } from "@anviq/core";
 import { typeScale } from "@anviq/ui-tokens";
 import { Pressable, Text } from "react-native";
 import { mobileTokens } from "../lib/appearance";
@@ -26,6 +26,7 @@ export function ReplyLine({
   onJump?: (id: string) => void;
 }) {
   if (!targetId && quote == null) return null;
+  if (isPageOriginReply({ replyQuote: quote, replyPreview: preview })) return null;
   const unavailable = preview === null || !targetId;
   const text = replyLabel(
     quote,

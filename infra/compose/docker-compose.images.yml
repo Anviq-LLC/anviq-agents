@@ -2,7 +2,7 @@
 # Drop this file and .env into any directory, then:
 #   docker compose --env-file .env -f docker-compose.images.yml up -d
 #
-# Tag contract matches docs/self-host.md (edge from main; release tags when published).
+# Tag contract matches docs/self-host-upgrading.md (edge from main; release tags when published).
 # Default is edge because that tag is published on every main build (linux/amd64 + linux/arm64).
 # Pin a published vX.Y.Z tag for a fixed version; `latest` moves to each new stable release.
 # Default SANDBOX_PROVIDER=docker boots a local computer via the in-stack supervisor (no E2B key).
@@ -16,7 +16,7 @@ name: anviq
 x-app-environment: &app-environment
   # Runtime
   NODE_ENV: production
-  # The app's own login, subject to row-level security (docs/self-host.md#database-roles).
+  # The app's own login, subject to row-level security (docs/self-host-configuration.md#database-roles).
   DATABASE_URL: postgres://anviq_app:${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-anviq}
   REALTIME_DATABASE_URL:
   DB_POOL_MAX:
@@ -27,9 +27,9 @@ x-app-environment: &app-environment
   AWS_KMS_KEY_ARN:
   AWS_KMS_ACCESS_KEY_ID:
   AWS_KMS_SECRET_ACCESS_KEY:
-  # on encrypts new content at rest; off stores it readable (docs/self-host.md#content-encryption).
+  # on encrypts new content at rest; off stores it readable (docs/self-host-storage.md#content-encryption).
   CONTENT_ENCRYPTION: ${CONTENT_ENCRYPTION:-on}
-  # Optional: keep computer homes and artifacts in S3-compatible storage (docs/self-host.md#shared-storage-migration).
+  # Optional: keep computer homes and artifacts in S3-compatible storage (docs/self-host-storage.md#shared-storage-migration).
   OBJECT_STORAGE_BUCKET:
   OBJECT_STORAGE_ENDPOINT:
   OBJECT_STORAGE_REGION:
@@ -41,6 +41,7 @@ x-app-environment: &app-environment
   AGENT_RUNTIME: pi
   API_URL: ${API_URL:-http://127.0.0.1:5173}
   MAX_UPLOAD_SIZE_MB:
+  MAX_ATTACHMENTS_PER_MESSAGE:
   ANVIQ_UPDATE_RESTART_SUPERVISOR:
   TICKET_BOARD_ENABLED:
   USER_DEVICES_ENABLED:
@@ -52,6 +53,11 @@ x-app-environment: &app-environment
   PHONE_CALL_COOLDOWN_MINUTES:
   ANVIQ_SECRETS_ALLOW_PRIVATE_HTTP:
   EXPO_ACCESS_TOKEN:
+  APNS_VOIP_KEY_ID:
+  APNS_VOIP_TEAM_ID:
+  APNS_VOIP_PRIVATE_KEY:
+  APNS_VOIP_ENVIRONMENT:
+  APNS_VOIP_BUNDLE_ID:
   # Secret storage
   SECRET_STORE: ${SECRET_STORE:-encrypted}
   INFISICAL_URL: ${INFISICAL_URL:-}
@@ -64,6 +70,9 @@ x-app-environment: &app-environment
   # Logs, errors, traces and analytics
   LOG_LEVEL:
   SECURITY_EVENT_RETENTION_DAYS:
+  AUDIT_EVENT_RETENTION_DAYS:
+  AUDIT_LOG_WEBHOOK_URL:
+  AUDIT_LOG_WEBHOOK_AUTHORIZATION:
   LOG_FORMAT:
   AXIOM_TOKEN:
   AXIOM_DATASET:
@@ -93,15 +102,18 @@ x-app-environment: &app-environment
   TYPESAFE_API_KEY:
   MAX_TOOL_CALLS_PER_TURN:
   MODEL_STREAM_MAX_RETRIES:
+  MODEL_STREAM_TIMEOUT_MS:
+  MODEL_CONNECT_TIMEOUT_MS:
+  MODEL_STREAM_IDLE_TIMEOUT_MS:
   ANVIQ_LOCAL_MODELS:
   ANVIQ_LOCAL_MODELS_URL:
   ANVIQ_LOCAL_VISION_MODELS:
+  ANVIQ_LOCAL_REASONING_MODELS:
   ANVIQ_LOCAL_CONTEXT_WINDOW:
   ANVIQ_LOCAL_MAX_TOKENS:
   ANVIQ_OPENAI_COMPATIBLE_VISION_MODELS:
   ANVIQ_OPENAI_COMPAT_ALLOW_PUBLIC:
   ANVIQ_OPENAI_COMPAT_PRIVATE_HOSTS:
-  ANVIQ_AUTO_REVIEW:
   ANVIQ_AUTO_REVIEW_PROVIDER:
   ANVIQ_AUTO_REVIEW_MODEL:
   ANVIQ_AUTO_REVIEW_MIN_CONFIDENCE:
@@ -181,8 +193,11 @@ x-app-environment: &app-environment
   SANDBOX_IDLE_MS:
   SANDBOX_MAX_COMPUTERS_PER_USER:
   COMPUTER_MAX_ACTIVE_MS:
+  COMPUTER_MAX_ACTIVE_UNBILLED_MS:
   COMPUTER_TAKEOVER_TTL_MS:
   BROWSER_PROVIDER:
+  NOVITA_API_KEY:
+  SANDBOX_TEMPLATE:
   E2B_API_KEY:
   DAYTONA_API_KEY:
   DAYTONA_API_URL:
@@ -190,10 +205,19 @@ x-app-environment: &app-environment
   DAYTONA_SNAPSHOT:
   BOAT_API_KEY:
   BOAT_API_URL:
+  BOXD_API_KEY:
+  BOXD_ORG:
   RAILWAY_API_TOKEN:
   RAILWAY_ENVIRONMENT_ID:
   RAILWAY_SANDBOX_REGION:
   RAILWAY_MAX_WORKSPACE_FILE_BYTES:
+  WUYING_ACCESS_KEY_ID:
+  WUYING_ACCESS_KEY_SECRET:
+  WUYING_DESKTOP_ID:
+  WUYING_END_USER_ID:
+  WUYING_MCP_TOKEN:
+  WUYING_MCP_URL:
+  WUYING_REGION_ID:
   CREATEOS_SANDBOX_API_KEY:
   CREATEOS_SANDBOX_BASE_URL:
   CREATEOS_SANDBOX_ROOTFS:
@@ -240,6 +264,9 @@ x-app-environment: &app-environment
   LARK_VERIFICATION_TOKEN:
   LARK_ENCRYPT_KEY:
   LARK_DOMAIN:
+  PHOTON_PROJECT_ID:
+  PHOTON_PROJECT_SECRET:
+  PHOTON_WEBHOOK_SECRET:
   # Optional egress proxy (Mainland / corporate). Empty = unset; either case works.
   HTTP_PROXY: ${HTTP_PROXY:-${http_proxy:-}}
   HTTPS_PROXY: ${HTTPS_PROXY:-${https_proxy:-}}
@@ -273,7 +300,7 @@ services:
 
   # Pull-only stub so `compose up` fetches the published desktop image without a checkout.
   computer:
-    image: ${ANVIQ_COMPUTER_IMAGE:-ghcr.io/leovoss/anviq-agents/computer}:${ANVIQ_COMPUTER_IMAGE_TAG:-edge}
+    image: ${ANVIQ_COMPUTER_IMAGE:-ghcr.io/anviq-llc/anviq-agents/computer}:${ANVIQ_COMPUTER_IMAGE_TAG:-edge}
     command: ["true"]
     network_mode: none
     restart: "no"
@@ -290,7 +317,7 @@ services:
   # Runs from the app image. Not published as its own image and not exposed on the host:
   # access to the supervisor is equivalent to control of the Docker host.
   supervisor:
-    image: ${ANVIQ_IMAGE:-ghcr.io/leovoss/anviq-agents/app}:${ANVIQ_IMAGE_TAG:-edge}
+    image: ${ANVIQ_IMAGE:-ghcr.io/anviq-llc/anviq-agents/app}:${ANVIQ_IMAGE_TAG:-edge}
     restart: unless-stopped
     command: ["pnpm", "--filter", "@anviq/sandbox-supervisor", "start"]
     init: true
@@ -306,7 +333,7 @@ services:
       SUPERVISOR_HOST: "0.0.0.0"
       SUPERVISOR_PORT: "7091"
       DOCKER_SOCKET: /var/run/docker.sock
-      ANVIQ_COMPUTER_IMAGE: ${ANVIQ_COMPUTER_IMAGE:-ghcr.io/leovoss/anviq-agents/computer}:${ANVIQ_COMPUTER_IMAGE_TAG:-edge}
+      ANVIQ_COMPUTER_IMAGE: ${ANVIQ_COMPUTER_IMAGE:-ghcr.io/anviq-llc/anviq-agents/computer}:${ANVIQ_COMPUTER_IMAGE_TAG:-edge}
       ANVIQ_COMPUTER_MEMORY: ${ANVIQ_COMPUTER_MEMORY:-2g}
       ANVIQ_COMPUTER_CPUS: ${ANVIQ_COMPUTER_CPUS:-2}
       ANVIQ_COMPUTER_PIDS_LIMIT: ${ANVIQ_COMPUTER_PIDS_LIMIT:-2048}
@@ -315,6 +342,7 @@ services:
       SANDBOX_SCREEN_NETWORK: isolated
       SANDBOX_COMPUTER_EGRESS: ${SANDBOX_COMPUTER_EGRESS:-auto}
       SANDBOX_COMPUTER_DNS: ${SANDBOX_COMPUTER_DNS:-}
+      SANDBOX_COMPUTER_MOUNTS: ${SANDBOX_COMPUTER_MOUNTS:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_FORMAT: ${LOG_FORMAT:-}
       AXIOM_TOKEN: ${AXIOM_TOKEN:-}
@@ -348,7 +376,7 @@ services:
   # container gets the owner login: the API and worker connect as anviq_app, which row-level
   # security binds, so code running in either cannot find a login that bypasses it.
   migrate:
-    image: ${ANVIQ_IMAGE:-ghcr.io/leovoss/anviq-agents/app}:${ANVIQ_IMAGE_TAG:-edge}
+    image: ${ANVIQ_IMAGE:-ghcr.io/anviq-llc/anviq-agents/app}:${ANVIQ_IMAGE_TAG:-edge}
     working_dir: /app/apps/api
     command: ["pnpm", "db:deploy"]
     restart: "no"
@@ -368,7 +396,7 @@ services:
         condition: service_healthy
 
   api:
-    image: ${ANVIQ_IMAGE:-ghcr.io/leovoss/anviq-agents/app}:${ANVIQ_IMAGE_TAG:-edge}
+    image: ${ANVIQ_IMAGE:-ghcr.io/anviq-llc/anviq-agents/app}:${ANVIQ_IMAGE_TAG:-edge}
     restart: unless-stopped
     # Node runs directly, not through pnpm: pnpm does not pass SIGTERM on, so a stop would kill the
     # process before its graceful shutdown finishes in-flight requests and jobs.
@@ -396,7 +424,7 @@ services:
       PASSKEY_APPLE_APP_IDS:
       PASSKEY_ANDROID_CERT_SHA256:
       # Proxies whose X-Forwarded-For is believed. Unset trusts this stack's own networks: the web
-      # proxy and a reverse proxy on the host. See docs/self-host.md#client-addresses.
+      # proxy and a reverse proxy on the host. See docs/self-host-production.md#client-addresses.
       TRUSTED_PROXIES:
       CLIENT_IP_HEADER:
       OIDC_ISSUER: ${OIDC_ISSUER:-}
@@ -430,6 +458,7 @@ services:
       SPACE_TEARDOWN_TIMEOUT_MS:
       ANVIQ_MIN_CLIENT_BUILD:
       ANVIQ_NAV_LINKS:
+      ANVIQ_ADMIN_EMAILS:
       VOICE_SUMMARY_MIN_CHARS:
     ports:
       - "127.0.0.1:${ANVIQ_API_PORT:-3100}:3100"
@@ -458,11 +487,14 @@ services:
       retries: 20
 
   worker:
-    image: ${ANVIQ_IMAGE:-ghcr.io/leovoss/anviq-agents/app}:${ANVIQ_IMAGE_TAG:-edge}
+    image: ${ANVIQ_IMAGE:-ghcr.io/anviq-llc/anviq-agents/app}:${ANVIQ_IMAGE_TAG:-edge}
     restart: unless-stopped
     # Directly, not through pnpm, so a stop reaches it (see the api command).
     working_dir: /app/apps/worker
     command: ["node", "--enable-source-maps", "dist/index.js"]
+    # A stop lets the running jobs finish rather than killing them mid-way, which would leave each
+    # locked for hours. Above JOB_DRAIN_TIMEOUT_MS in packages/adapters/src/wakeup.ts.
+    stop_grace_period: 50m
     healthcheck:
       test: ["CMD", "node", "dist/health-check.js"]
       interval: 30s
@@ -497,7 +529,7 @@ services:
         condition: service_healthy
 
   web:
-    image: ${ANVIQ_IMAGE:-ghcr.io/leovoss/anviq-agents/app}:${ANVIQ_IMAGE_TAG:-edge}
+    image: ${ANVIQ_IMAGE:-ghcr.io/anviq-llc/anviq-agents/app}:${ANVIQ_IMAGE_TAG:-edge}
     restart: unless-stopped
     # Directly, not through pnpm, so a stop reaches it (see the api command).
     working_dir: /app/apps/web
@@ -528,7 +560,7 @@ services:
       ANVIQ_CSP_CONNECT_SRC: ${ANVIQ_CSP_CONNECT_SRC:-}
       CRISP_WEBSITE_ID:
     ports:
-      - "127.0.0.1:${ANVIQ_WEB_PORT:-5173}:5173"
+      - "${ANVIQ_WEB_BIND:-127.0.0.1}:${ANVIQ_WEB_PORT:-5173}:5173"
     networks:
       - app
     depends_on:

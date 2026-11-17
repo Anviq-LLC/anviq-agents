@@ -7,6 +7,17 @@ export function computersAreUnavailable(sandboxProvider: string | null | undefin
   return sandboxProvider === "none" || sandboxProvider === "";
 }
 
+/** Whether an account may run its computers on its own provider on this deployment. */
+export function canChooseOwnComputer(sandboxProvider: string | null | undefined): boolean {
+  // Those deployments run every computer on the server's own provider.
+  return (
+    !!sandboxProvider &&
+    !computersAreUnavailable(sandboxProvider) &&
+    sandboxProvider !== "desktop" &&
+    sandboxProvider !== "fake"
+  );
+}
+
 export type SandboxAvailabilityPhase = "idle" | "loading" | "recovered" | "unavailable" | "failure";
 
 /** Lines to paste into `.env` — placeholders only, never real secrets. */
@@ -21,6 +32,11 @@ export function sandboxEnvGuidanceLines(): string[] {
     "# Hosted sandbox: E2B",
     "# SANDBOX_PROVIDER=e2b",
     "# E2B_API_KEY=<your-key>",
+    "",
+    "# Hosted sandbox: Novita",
+    "# SANDBOX_PROVIDER=novita",
+    "# NOVITA_API_KEY=<your-key>",
+    "# Build template: pnpm sandbox:novita-template",
     "",
     "# Hosted sandbox: Daytona",
     "# SANDBOX_PROVIDER=daytona",
@@ -43,7 +59,8 @@ export type SandboxProviderKind = "none" | "docker" | "hosted" | "other";
 export function classifySandboxProvider(provider: string | null | undefined): SandboxProviderKind {
   if (provider == null || provider === "" || computersAreUnavailable(provider)) return "none";
   if (provider === "docker" || provider === "desktop") return "docker";
-  if (provider === "e2b" || provider === "daytona" || provider === "boat") return "hosted";
+  if (provider === "e2b" || provider === "novita" || provider === "daytona" || provider === "boat")
+    return "hosted";
   return "other";
 }
 
@@ -51,6 +68,7 @@ export function sandboxProviderLabel(provider: string): string {
   if (provider === "docker") return "Docker";
   if (provider === "desktop") return "Desktop";
   if (provider === "e2b") return "E2B";
+  if (provider === "novita") return "Novita";
   if (provider === "daytona") return "Daytona";
   if (provider === "boat") return "Boat";
   if (provider === "fake") return "Fake";

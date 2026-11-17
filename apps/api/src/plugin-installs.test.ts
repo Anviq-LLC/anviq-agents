@@ -40,6 +40,7 @@ const fetcher = async () => ({
 function setup() {
   const prisma = {
     $executeRaw: vi.fn(),
+    $queryRaw: vi.fn().mockResolvedValue([{ bypass: null }]),
     capabilityInstall: {
       findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn(async ({ data }) => ({ ...data, id: "install-test", createdAt: new Date(0) })),
@@ -55,10 +56,16 @@ function setup() {
     },
     agentSkill: {
       findFirst: vi.fn().mockResolvedValue(null),
-      create: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn(async ({ data }) => ({ ...data, id: "skill-test" })),
       deleteMany: vi.fn(),
     },
-    mcpServer: { create: vi.fn(), findMany: vi.fn().mockResolvedValue([]) },
+    agentSkillSpace: { createMany: vi.fn() },
+    mcpServer: {
+      create: vi.fn(async ({ data }) => ({ ...data, id: "server-test" })),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    mcpServerSpace: { createMany: vi.fn() },
     secret: { create: vi.fn(), count: vi.fn().mockResolvedValue(1) },
     botSecret: { count: vi.fn().mockResolvedValue(0) },
     vaultCredential: { count: vi.fn().mockResolvedValue(0) },
@@ -101,6 +108,7 @@ describe("confirmed plugin installation", () => {
       data: expect.objectContaining({
         spaceId: actor.spaceId,
         userId: actor.userId,
+        allSpaces: true,
         source: "plugin",
         installId: "install-test",
         name: "example-skill",
@@ -113,10 +121,15 @@ describe("confirmed plugin installation", () => {
     expect(prisma.mcpServer.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         installId: "install-test",
+        allSpaces: true,
         secretId: "secret-test",
         headers: { "X-Tenant": true },
         transport: "streamable_http",
       }),
+    });
+    // A connector available in every space keeps its credential on the account.
+    expect(prisma.secret.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ id: "secret-test", spaceId: null, userId: actor.userId }),
     });
     expect(deps.assertEndpoint).toHaveBeenCalledWith("https://tools.example.test/mcp");
   });
@@ -149,14 +162,17 @@ describe("confirmed plugin installation", () => {
     await expect(installPlugin(deps, actor, await input())).rejects.toMatchObject({
       code: "CONFLICT",
     });
-    prisma.agentSkill.findFirst.mockResolvedValueOnce({ id: "existing-skill" } as never);
+    // A same-named skill in any of the user's spaces clashes, since the plugin reaches them all.
+    prisma.agentSkill.findMany.mockResolvedValueOnce([
+      { spaceId: "other-space", allSpaces: false, availableIn: [] },
+    ] as never);
     await expect(installPlugin(deps, actor, await input())).rejects.toMatchObject({
       code: "CONFLICT",
     });
     expect(prisma.capabilityInstall.create).not.toHaveBeenCalled();
     expect(prisma.agentSkill.create).not.toHaveBeenCalled();
   });
-  it("checks built-in names before opening a write transaction", async () => {
+  it("installs the other skills when one repeats a built-in skill", async () => {
     const { deps, prisma } = setup();
     const builtin = BUILTIN_AGENT_SKILLS[0]!;
     deps.fetcher = async () => ({
@@ -164,12 +180,32 @@ describe("confirmed plugin installation", () => {
       files: [
         { path: ".cursor-plugin/plugin.json", content: JSON.stringify({ name: "example-plugin" }) },
         { path: "skills/builtin/SKILL.md", content: builtin.content },
+        {
+          path: "skills/example/SKILL.md",
+          content: "---\nname: example-skill\ndescription: Example skill\n---\n\nUse it.\n",
+        },
+      ],
+    });
+    const digest = (await previewPluginInstall({ source, fetcher: deps.fetcher })).digest;
+    await installPlugin(deps, actor, { source, name: "Example", config: {}, pluginDigest: digest });
+    expect(prisma.agentSkill.create).toHaveBeenCalledTimes(1);
+    expect(prisma.agentSkill.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ name: "example-skill" }),
+    });
+  });
+  it("refuses a plugin whose only skill repeats a built-in one, before writing", async () => {
+    const { deps, prisma } = setup();
+    deps.fetcher = async () => ({
+      resolvedSha: sha,
+      files: [
+        { path: ".cursor-plugin/plugin.json", content: JSON.stringify({ name: "example-plugin" }) },
+        { path: "skills/builtin/SKILL.md", content: BUILTIN_AGENT_SKILLS[0]!.content },
       ],
     });
     const digest = (await previewPluginInstall({ source, fetcher: deps.fetcher })).digest;
     await expect(
       installPlugin(deps, actor, { source, name: "Example", config: {}, pluginDigest: digest }),
-    ).rejects.toMatchObject({ code: "CONFLICT" });
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
   it("cleans prepared secret references when a later encryption fails", async () => {
@@ -266,6 +302,10 @@ describe("plugin RPC boundary", () => {
     const digest = (await input()).pluginDigest;
     const installed = {
       id: "install-test",
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      allSpaces: true,
+      availableIn: [],
       kind: "plugin",
       source,
       version: sha,
@@ -301,6 +341,37 @@ describe("plugin RPC boundary", () => {
     expect(
       await setPluginParts({ ...deps, removeServer }, actor, { id: installed.id, parts: [] }),
     ).toBeNull();
+  });
+  it("lists only the skills that installed when skills are added later", async () => {
+    const { deps, prisma } = setup();
+    deps.fetcher = async () => ({
+      resolvedSha: sha,
+      files: [
+        ...(await fetcher()).files,
+        { path: "skills/builtin/SKILL.md", content: BUILTIN_AGENT_SKILLS[0]!.content },
+      ],
+    });
+    const digest = (await previewPluginInstall({ source, fetcher: deps.fetcher })).digest;
+    // Saved by a connector-only install from before built-in names were left out.
+    const stalePreview = [{ name: BUILTIN_AGENT_SKILLS[0]!.name }, { name: "example-skill" }];
+    prisma.capabilityInstall.findFirst.mockResolvedValue({
+      id: "install-test",
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      allSpaces: true,
+      availableIn: [],
+      kind: "plugin",
+      source,
+      version: sha,
+      digest,
+      config: { parts: ["connector"], skills: stalePreview },
+    } as never);
+    const result = await setPluginParts({ ...deps, removeServer: vi.fn() }, actor, {
+      id: "install-test",
+      parts: ["connector", "skills"],
+    });
+    expect(prisma.agentSkill.create).toHaveBeenCalledTimes(1);
+    expect(result?.config.skills).toEqual([expect.objectContaining({ name: "example-skill" })]);
   });
   it("refuses to add a part when the pinned content no longer matches", async () => {
     const { deps, prisma } = setup();

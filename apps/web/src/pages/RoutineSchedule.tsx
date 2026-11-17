@@ -5,6 +5,7 @@ import {
   cronFromPreset,
   cronIntervalAmounts,
   describeCronPreset,
+  localizedClock,
   russianIntervalUnit,
 } from "@anviq/core";
 import { Input, NativeSelect, NativeSelectOption } from "@anviq/ui-web";
@@ -112,7 +113,7 @@ export function RoutineSchedule({
     >
       {times.map((time) => (
         <NativeSelectOption key={time} value={time}>
-          {time}
+          {localizedClock(time, i18n.locale)}
         </NativeSelectOption>
       ))}
     </NativeSelect>

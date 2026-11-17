@@ -1,56 +1,73 @@
 /** @jsxRuntime automatic */
 import type { TransactionalEmail } from "@anviq/adapter-kit";
-import { displayName } from "@anviq/core";
-import { lightTokens } from "@anviq/ui-tokens";
-import { Hr, Link, Text } from "react-email";
-import { linkStyle, message } from "./email.js";
+import { ANDROID_APP_STORE_URL, IOS_APP_STORE_URL } from "@anviq/contracts";
+import { Link, Text } from "react-email";
+import { emailText, greeting, linkStyle, message } from "./email.js";
+
+const APPS: Readonly<Record<string, string>> = {
+  iPhone: IOS_APP_STORE_URL,
+  Android: ANDROID_APP_STORE_URL,
+  Mac: "https://anviq.net/api/download?platform=mac",
+  Windows: "https://anviq.net/api/download?platform=windows",
+  Linux: "https://anviq.net/api/download?platform=linux",
+};
 
 export function welcomeEmail(
   user: { email: string; name: string },
   unsubscribeUrl: string,
+  locale = "en",
 ): Promise<TransactionalEmail> {
+  const say = emailText(locale);
   return message(
     user.email,
-    "Welcome to Anviq Agents",
+    locale,
+    say("Welcome to Anviq Agents"),
     <>
-      <Text>Hi {displayName(user.name, "there")},</Text>
-      <Text>Thanks for signing up for Anviq Agents.</Text>
+      <Text>{greeting(say, user.name)}</Text>
+      <Text>{say("Thanks for signing up for Anviq Agents.")}</Text>
       <Text>
-        Questions or ideas?{" "}
+        {say("Anviq Agents also has apps for")}{" "}
+        {/* The language's own list ("A, B, and C", "A, B y C"), with each app a link. */}
+        {new Intl.ListFormat(locale, { type: "conjunction" })
+          .formatToParts(Object.keys(APPS))
+          .map((part, index) =>
+            part.type === "element" ? (
+              <Link key={part.value} href={APPS[part.value]} style={linkStyle}>
+                {part.value}
+              </Link>
+            ) : (
+              <span key={`${index}${part.value}`}>{part.value}</span>
+            ),
+          )}
+        .
+      </Text>
+      <Text>
+        {say("Questions or ideas?")}{" "}
         <Link href="https://discord.gg/RWwKa2Sn7h" style={linkStyle}>
-          Join us on Discord
+          {say("Join us on Discord")}
         </Link>
         .
       </Text>
       <Text>
-        Anviq Agents is open source. If you like it,{" "}
+        {say("Anviq Agents is open source. If you like it,")}{" "}
         <Link href="https://github.com/leovoss/anviq-agents" style={linkStyle}>
-          a star on GitHub
+          {say("a star on GitHub")}
         </Link>{" "}
-        helps others find it.
+        {say("helps others find it.")}
       </Text>
       <Text>
-        Want to run it on your own servers?{" "}
+        {say("Want to run it on your own servers?")}{" "}
         <Link
           href="https://github.com/leovoss/anviq-agents/blob/main/docs/self-host.md"
           style={linkStyle}
         >
-          Self-host Anviq Agents
+          {say("Self-host Anviq Agents")}
         </Link>
         .
       </Text>
-      <Text>Have any questions? Reply to this email.</Text>
+      <Text>{say("Have any questions? Reply to this email.")}</Text>
       <Text>Elie</Text>
-      <Hr style={{ borderColor: lightTokens.border, marginTop: "32px" }} />
-      <Text style={{ color: lightTokens.mutedForeground, fontSize: "12px" }}>
-        <Link href={unsubscribeUrl} style={{ color: lightTokens.mutedForeground }}>
-          Unsubscribe
-        </Link>
-      </Text>
     </>,
-    {
-      "List-Unsubscribe": `<${unsubscribeUrl}>`,
-      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-    },
+    unsubscribeUrl,
   );
 }

@@ -4,17 +4,18 @@ import {
   applyJudgeDecision,
   approvalModeFromPreference,
   approvalPreferenceFromMode,
-  COMPOSIO_MULTI_EXECUTE_TOOL,
-  composioBatchActions,
+  batchActions,
   connectorKindFromToolName,
   connectorReadRequiresApproval,
   connectorToolRequiresApproval,
+  decisiveActionApprovalRules,
   isApprovalAskBlock,
   isOwnerStartedRun,
   isSecretAskBlock,
   newSiteOutcome,
   outboundSiteGate,
   planActionGate,
+  repeatsDeniedAction,
   resolveActionApproval,
   resolveActionApprovalDetail,
   resolveActionApprovalForTools,
@@ -26,6 +27,31 @@ import {
 } from "./action-approval.js";
 
 describe("toolRequiresApproval", () => {
+  it.each([
+    { effect: "deny" as const, decision: "deny" },
+    { effect: "require_approval" as const, decision: "ask" },
+    { effect: "always_allow" as const, decision: "allow" },
+  ])("keeps original and scoped tool rules effective: $effect", ({ effect, decision }) => {
+    const tool = { name: "mail_send_email", aliases: ["mail_send_email__account"] };
+    for (const matchValue of [tool.name, tool.aliases[0]!]) {
+      expect(
+        resolveActionApprovalForTools({
+          tools: [tool],
+          rules: [{ effect, matchKind: "tool", matchValue }],
+        }).decision,
+      ).toBe(decision);
+    }
+    expect(
+      resolveActionApprovalForTools({
+        tools: [tool],
+        rules: [
+          { effect: "always_allow", matchKind: "tool", matchValue: tool.aliases[0]! },
+          { effect: "deny", matchKind: "tool", matchValue: tool.name },
+        ],
+      }).decision,
+    ).toBe("deny");
+  });
+
   it("requires approval for consequential builtins and connector writes", () => {
     expect(toolRequiresApproval("destination.write", true)).toBe(true);
     expect(toolRequiresApproval("secret_request", false)).toBe(true);
@@ -62,16 +88,17 @@ describe("toolRequiresApproval", () => {
     }
   });
 
-  it("always asks before bot management writes that touch several bots, cost money or rewrite a bot", () => {
-    for (const name of [
-      "create_group",
-      "update_group",
-      "set_child_instructions",
-      "set_child_bot_model",
-      "create_child_routine",
-    ]) {
+  it("always asks before bot management writes that cost money or rewrite a bot", () => {
+    for (const name of ["set_child_instructions", "set_child_bot_model"]) {
       expect(toolRequiresApproval(name, false)).toBe(true);
       expect(toolRequiresExplicitApproval(name)).toBe(true);
+    }
+  });
+
+  it("treats grouping and scheduling other bots as ordinary approvals that Never ask skips", () => {
+    for (const name of ["create_group", "update_group", "create_child_routine"]) {
+      expect(toolRequiresApproval(name, false)).toBe(true);
+      expect(toolRequiresExplicitApproval(name)).toBe(false);
     }
   });
 
@@ -96,6 +123,7 @@ describe("toolRequiresApproval", () => {
     expect(toolRequiresApproval("contacts_get_or_create", true)).toBe(true);
     expect(toolRequiresApproval("notion_search_and_update", true)).toBe(true);
     expect(toolRequiresApproval("crm_get_then_upsert", true)).toBe(true);
+    expect(toolRequiresApproval("github_get_and_lock_issue", true)).toBe(true);
   });
 });
 
@@ -103,6 +131,14 @@ describe("connectorToolRequiresApproval", () => {
   it("matches read-only connector tool names", () => {
     expect(connectorToolRequiresApproval("list_items")).toBe(false);
     expect(connectorToolRequiresApproval("send_message")).toBe(true);
+  });
+
+  it("reads words separated by hyphens", () => {
+    expect(connectorToolRequiresApproval("gmail-find-email", true)).toBe(false);
+    expect(connectorToolRequiresApproval("google_calendar-list-events", true)).toBe(false);
+    expect(connectorToolRequiresApproval("gmail-send-email", true)).toBe(true);
+    expect(connectorToolRequiresApproval("google_sheets-get-or-create-row", true)).toBe(true);
+    expect(connectorToolRequiresApproval("hubspot-find-and-update-contact", true)).toBe(true);
   });
 
   it("requires approval for a declared write whatever its name says", () => {
@@ -217,6 +253,15 @@ describe("isApprovalAskBlock", () => {
         actions: [{ id: "deny", label: "No" }],
       }),
     ).toBe(false);
+    for (const ids of [["allow"], ["allow", "deny", "edit"]]) {
+      expect(
+        isApprovalAskBlock({
+          kind: "ask",
+          approvalEffectId: "effect-1",
+          actions: ids.map((id) => ({ id, label: id })),
+        }),
+      ).toBe(false);
+    }
   });
 });
 
@@ -346,18 +391,30 @@ describe("resolveActionApproval", () => {
 });
 
 describe("planActionGate", () => {
-  const unruled = { decision: "allow" as const, source: "default" as const, matchingRules: [] };
+  const unruled = {
+    decision: "allow" as const,
+    source: "default" as const,
+    matchingRules: [],
+    decisiveRules: [],
+  };
   const allowed = {
     decision: "allow" as const,
     source: "always_allow" as const,
     matchingRules: [],
+    decisiveRules: [],
   };
   const asked = {
     decision: "ask" as const,
     source: "require_approval" as const,
     matchingRules: [],
+    decisiveRules: [],
   };
-  const blocked = { decision: "deny" as const, source: "deny" as const, matchingRules: [] };
+  const blocked = {
+    decision: "deny" as const,
+    source: "deny" as const,
+    matchingRules: [],
+    decisiveRules: [],
+  };
   const gate = (
     mode: ApprovalMode,
     overrides: Partial<Parameters<typeof planActionGate>[0]> = {},
@@ -391,6 +448,15 @@ describe("planActionGate", () => {
       expect(gate(mode, { resolved: blocked })).toBe("deny");
       expect(gate(mode, { resolved: blocked, mandatory: true })).toBe("deny");
       expect(gate(mode, { resolved: blocked, consequential: false })).toBe("deny");
+    }
+  });
+
+  it("asks for a purchase in every mode, past an allow rule, and still refuses a block", () => {
+    for (const mode of ["never", "auto", "ask"] as const) {
+      expect(gate(mode, { purchase: true, consequential: false })).toBe("ask");
+      expect(gate(mode, { purchase: true, resolved: allowed })).toBe("ask");
+      expect(gate(mode, { purchase: true, mandatory: true, steerable: true })).toBe("ask");
+      expect(gate(mode, { purchase: true, resolved: blocked })).toBe("deny");
     }
   });
 
@@ -474,8 +540,8 @@ describe("block rules", () => {
       resolveActionApprovalDetail({
         toolName: "COMPOSIO_REMOTE_WORKBENCH",
         rules: [rule("always_allow", "tool", "GMAIL_SEND_EMAIL")],
-      }).decision,
-    ).toBe("allow");
+      }),
+    ).toMatchObject({ decision: "allow", source: "default" });
   });
 
   it("refuses a blocked tool in a change watch", () => {
@@ -489,23 +555,88 @@ describe("block rules", () => {
   });
 });
 
-describe("Composio batches", () => {
+describe("decisiveActionApprovalRules", () => {
+  const rule = (
+    effect: ActionApprovalRule["effect"],
+    matchKind: ActionApprovalRule["matchKind"],
+    matchValue: string,
+  ): ActionApprovalRule => ({ effect, matchKind, matchValue });
+
+  it("reports only the most specific rule that asked", () => {
+    const category = rule("require_approval", "category", "email");
+    const tool = rule("require_approval", "tool", "gmail_send_email");
+    const connector = rule("always_allow", "connector", "gmail");
+    const resolved = resolveActionApprovalDetail({
+      toolName: "GMAIL_SEND_EMAIL",
+      connectorKind: "gmail",
+      rules: [category, tool, connector],
+    });
+
+    expect(resolved).toMatchObject({ decision: "ask", source: "require_approval" });
+    expect(decisiveActionApprovalRules(resolved)).toEqual([tool]);
+  });
+
+  it("reports the block rule even when a narrower allow also matched", () => {
+    const block = rule("deny", "connector", "gmail");
+    const allow = rule("always_allow", "tool", "gmail_send_email");
+    const resolved = resolveActionApprovalDetail({
+      toolName: "GMAIL_SEND_EMAIL",
+      connectorKind: "gmail",
+      rules: [block, allow],
+    });
+
+    expect(resolved).toMatchObject({ decision: "deny", source: "deny" });
+    expect(decisiveActionApprovalRules(resolved)).toEqual([block]);
+  });
+
+  it("reports nothing when no saved rule decided", () => {
+    expect(
+      decisiveActionApprovalRules(
+        resolveActionApprovalDetail({
+          toolName: "GMAIL_SEND_EMAIL",
+          connectorKind: "gmail",
+          rules: [],
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      decisiveActionApprovalRules(
+        resolveActionApprovalDetail({
+          toolName: "GMAIL_SEND_EMAIL",
+          connectorKind: "gmail",
+          rules: [rule("always_allow", "tool", "gmail_send_email")],
+        }),
+      ),
+    ).toEqual([]);
+  });
+});
+
+const BATCH_TOOL = "COMPOSIO_MULTI_EXECUTE_TOOL";
+
+describe("batches", () => {
+  const shape = { items: "tools", action: "tool_slug" };
+
   it("lists each action a batch runs, and flags an entry that names none", () => {
     expect(
-      composioBatchActions(COMPOSIO_MULTI_EXECUTE_TOOL, {
+      batchActions(shape, {
         tools: [{ tool_slug: "GMAIL_SEND_EMAIL" }, { tool_slug: "GMAIL_SEND_EMAIL" }],
       }),
-    ).toEqual({ slugs: ["GMAIL_SEND_EMAIL"], complete: true });
+    ).toEqual({ actions: ["GMAIL_SEND_EMAIL"], complete: true });
     expect(
-      composioBatchActions(COMPOSIO_MULTI_EXECUTE_TOOL, {
+      batchActions(shape, {
         tools: [{ tool_slug: "SLACK_SEND_MESSAGE" }, { arguments: {} }],
       }),
-    ).toEqual({ slugs: ["SLACK_SEND_MESSAGE"], complete: false });
-    expect(composioBatchActions(COMPOSIO_MULTI_EXECUTE_TOOL, { tools: [] })).toEqual({
-      slugs: [],
+    ).toEqual({ actions: ["SLACK_SEND_MESSAGE"], complete: false });
+    expect(batchActions(shape, { tools: [{ tool_slug: "  " }] })).toEqual({
+      actions: [],
       complete: false,
     });
-    expect(composioBatchActions("GMAIL_SEND_EMAIL", { tools: [] })).toBeUndefined();
+  });
+
+  it("treats a batch that lists no actions as unreadable", () => {
+    for (const args of [{ tools: [] }, {}, { tools: "GMAIL_SEND_EMAIL" }, null]) {
+      expect(batchActions(shape, args)).toEqual({ actions: [], complete: false });
+    }
   });
 
   const rules: ActionApprovalRule[] = [
@@ -535,22 +666,112 @@ describe("Composio batches", () => {
     expect(
       resolveActionApprovalForTools({
         tools: [{ name: "GMAIL_SEND_EMAIL" }],
-        wrapper: { name: COMPOSIO_MULTI_EXECUTE_TOOL, connectorKind: "composio" },
+        wrapper: { name: BATCH_TOOL, connectorKind: "composio" },
         rules: [...rules, { effect: "deny", matchKind: "connector", matchValue: "composio" }],
       }).decision,
     ).toBe("deny");
+  });
+
+  it("does not carry an always-allowed archive over to a send in the same batch tool", () => {
+    const archived: ActionApprovalRule[] = [
+      { effect: "always_allow", matchKind: "tool", matchValue: "gmail_archive_thread" },
+    ];
+    expect(
+      resolveActionApprovalForTools({ tools: [{ name: "GMAIL_ARCHIVE_THREAD" }], rules: archived }),
+    ).toMatchObject({ decision: "allow", source: "always_allow" });
+    expect(
+      resolveActionApprovalForTools({ tools: [{ name: "GMAIL_SEND_EMAIL" }], rules: archived }),
+    ).toMatchObject({ decision: "allow", source: "default" });
+  });
+
+  it("lets the strictest action decide a mixed batch", () => {
+    const mixed: ActionApprovalRule[] = [
+      { effect: "always_allow", matchKind: "tool", matchValue: "GMAIL_ARCHIVE_THREAD" },
+      { effect: "require_approval", matchKind: "tool", matchValue: "GMAIL_SEND_EMAIL" },
+      { effect: "deny", matchKind: "tool", matchValue: "GMAIL_DELETE_MESSAGE" },
+    ];
+    const resolve = (...names: string[]) =>
+      resolveActionApprovalForTools({ tools: names.map((name) => ({ name })), rules: mixed });
+    expect(resolve("GMAIL_ARCHIVE_THREAD", "GMAIL_SEND_EMAIL")).toMatchObject({
+      decision: "ask",
+      source: "require_approval",
+    });
+    expect(
+      resolve("GMAIL_SEND_EMAIL", "GMAIL_ARCHIVE_THREAD", "GMAIL_DELETE_MESSAGE").decision,
+    ).toBe("deny");
+    expect(resolve("GMAIL_ARCHIVE_THREAD", "GMAIL_LIST_THREADS")).toMatchObject({
+      decision: "allow",
+      source: "default",
+    });
+    expect(resolve()).toMatchObject({ decision: "allow", source: "default" });
+  });
+
+  it("matches a tool or category rule on the action inside the batch", () => {
+    const tool = (name: string) => ({ name, connectorKind: connectorKindFromToolName(name) });
+    expect(
+      resolveActionApprovalForTools({
+        tools: [tool("GMAIL_SEND_EMAIL")],
+        wrapper: { name: BATCH_TOOL, connectorKind: "composio" },
+        rules: [{ effect: "require_approval", matchKind: "tool", matchValue: "GMAIL_SEND_EMAIL" }],
+      }).decision,
+    ).toBe("ask");
+    const email: ActionApprovalRule[] = [
+      { effect: "require_approval", matchKind: "category", matchValue: "email" },
+    ];
+    expect(
+      resolveActionApprovalForTools({
+        tools: [tool("GMAIL_SEND_EMAIL")],
+        wrapper: { name: BATCH_TOOL, connectorKind: "composio" },
+        rules: email,
+      }).decision,
+    ).toBe("ask");
+    expect(
+      resolveActionApprovalForTools({
+        tools: [tool("GMAIL_LIST_THREADS")],
+        wrapper: { name: BATCH_TOOL, connectorKind: "composio" },
+        rules: email,
+      }).decision,
+    ).toBe("allow");
   });
 
   it("never lets an allow rule on the batch tool allow its actions", () => {
     expect(
       resolveActionApprovalForTools({
         tools: [{ name: "SLACK_SEND_MESSAGE" }],
-        wrapper: { name: COMPOSIO_MULTI_EXECUTE_TOOL },
-        rules: [
-          { effect: "always_allow", matchKind: "tool", matchValue: COMPOSIO_MULTI_EXECUTE_TOOL },
-        ],
+        wrapper: { name: BATCH_TOOL },
+        rules: [{ effect: "always_allow", matchKind: "tool", matchValue: BATCH_TOOL }],
       }),
     ).toMatchObject({ decision: "allow", source: "default" });
+  });
+
+  it("attributes a batch ask only to the action whose rule required it", () => {
+    const gmailAsk: ActionApprovalRule = {
+      effect: "require_approval",
+      matchKind: "connector",
+      matchValue: "gmail",
+    };
+    const gmailAllow: ActionApprovalRule = {
+      effect: "always_allow",
+      matchKind: "tool",
+      matchValue: "GMAIL_SEND_EMAIL",
+    };
+    const purchaseAsk: ActionApprovalRule = {
+      effect: "require_approval",
+      matchKind: "category",
+      matchValue: "purchase",
+    };
+
+    const resolved = resolveActionApprovalForTools({
+      tools: [
+        { name: "GMAIL_SEND_EMAIL", readOnly: false },
+        { name: "STRIPE_CREATE_CHARGE", connectorKind: "stripe", readOnly: false },
+      ],
+      rules: [gmailAsk, gmailAllow, purchaseAsk],
+    });
+
+    expect(resolved).toMatchObject({ decision: "ask", source: "require_approval" });
+    expect(resolved.matchingRules).toEqual(expect.arrayContaining([gmailAsk, purchaseAsk]));
+    expect(decisiveActionApprovalRules(resolved)).toEqual([purchaseAsk]);
   });
 });
 
@@ -645,6 +866,20 @@ describe("outboundSiteGate", () => {
       "allow",
     );
     expect(outboundSiteGate({ site: "other.com", trusted: false, rules: [siteRule] })).toBe("new");
+    expect(
+      outboundSiteGate({
+        site: "example.com",
+        trusted: false,
+        rules: [{ ...siteRule, effect: "require_approval" }],
+      }),
+    ).toBe("new");
+    expect(
+      outboundSiteGate({
+        site: "example.com",
+        trusted: false,
+        rules: [{ ...siteRule, matchValue: "Example.COM" }],
+      }),
+    ).toBe("allow");
   });
 
   it("matches site rules ahead of tool rules", () => {
@@ -715,4 +950,35 @@ it("classifies schedule_update like schedule_create", () => {
 it("requires human confirmation to approve an agent connection", () => {
   expect(toolRequiresExplicitApproval("respond_agent_connection")).toBe(true);
   expect(toolRequiresApproval("respond_agent_connection", false)).toBe(true);
+});
+
+describe("repeatsDeniedAction", () => {
+  const WRAPPER = "COMPOSIO_MULTI_EXECUTE_TOOL";
+  const sent = { tools: [{ tool_slug: "GMAIL_SEND_EMAIL" }] };
+
+  it("matches a plain tool whatever its arguments", () => {
+    expect(
+      repeatsDeniedAction({
+        toolName: "shell",
+        args: { command: "pwd" },
+        denied: [{ command: "ls" }],
+      }),
+    ).toBe(true);
+    expect(repeatsDeniedAction({ toolName: "shell", args: {}, denied: [] })).toBe(false);
+  });
+
+  it("matches a multi-execute on any shared slug, ignoring case", () => {
+    const args = (...slugs: string[]) => ({ tools: slugs.map((tool_slug) => ({ tool_slug })) });
+    expect(
+      repeatsDeniedAction({
+        toolName: WRAPPER,
+        args: args("GMAIL_LIST", "gmail_send_email"),
+        denied: [sent],
+      }),
+    ).toBe(true);
+    expect(
+      repeatsDeniedAction({ toolName: WRAPPER, args: args("GMAIL_SEND_DRAFT"), denied: [sent] }),
+    ).toBe(false);
+    expect(repeatsDeniedAction({ toolName: WRAPPER, args: {}, denied: [sent] })).toBe(false);
+  });
 });

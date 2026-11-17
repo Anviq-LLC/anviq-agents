@@ -1,7 +1,10 @@
 import type { Socket } from "node:net";
+import { unwrapEnvFromKeyManager } from "@anviq/adapters";
 import { loadRootEnv } from "@anviq/core/node/load-root-env";
+import { stopOnShutdownSignals } from "@anviq/core/node/shutdown-signals";
 
 loadRootEnv();
+await unwrapEnvFromKeyManager();
 
 import { SERVICE_NAMES } from "@anviq/logging";
 import { createRootLogger } from "@anviq/logging/axiom";
@@ -41,8 +44,7 @@ try {
     await stop();
     await logger.flush({ timeoutMs: 2_000 });
   };
-  process.once("SIGTERM", () => void shutdown());
-  process.once("SIGINT", () => void shutdown());
+  stopOnShutdownSignals(shutdown);
 } catch (error) {
   logger.error("api startup failed", error);
   await logger.flush({ timeoutMs: 2_000 });

@@ -2,24 +2,8 @@ name: Playwright
 
 on:
   workflow_dispatch:
-    inputs:
-      sandbox_provider:
-        description: Sandbox provider
-        required: true
-        type: choice
-        options:
-          - fake
-          - e2b
-          - daytona
-          - boat
-        default: fake
   workflow_call:
     inputs:
-      sandbox_provider:
-        description: Sandbox provider
-        required: false
-        type: string
-        default: fake
       publish_report:
         description: Publish this run to the persistent visual dashboard
         required: false
@@ -30,21 +14,22 @@ on:
         required: false
         type: boolean
         default: false
+      skip:
+        description: Report the checks as skipped because the change cannot affect them
+        required: false
+        type: boolean
+        default: false
+      nightly:
+        description: Also run the visual and edge-case specs kept out of pull requests
+        required: false
+        type: boolean
+        default: false
     secrets:
       S3_ACCESS_KEY_ID:
         description: Access key used to publish visual reports
         required: false
       S3_SECRET_ACCESS_KEY:
         description: Secret key used to publish visual reports
-        required: false
-      E2B_API_KEY:
-        description: E2B API key used only when the E2B sandbox is selected
-        required: false
-      DAYTONA_API_KEY:
-        description: Daytona API key used only when the Daytona sandbox is selected
-        required: false
-      BOAT_API_KEY:
-        description: Boat API key used only when the Boat sandbox is selected
         required: false
 
 permissions:
@@ -57,22 +42,23 @@ env:
 
 jobs:
   shard:
-    name: Web E2E (${{ matrix.shard }}/4)
-    runs-on: ubuntu-latest
+    name: Web E2E (${{ matrix.shard }}/${{ inputs.nightly && 4 || 2 }})
+    if: ${{ !inputs.skip }}
+    runs-on: incredibuild-ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: ${{ fromJSON(inputs.nightly && '[1, 2, 3, 4]' || '[1, 2]') }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
@@ -81,30 +67,18 @@ jobs:
         # Skip --with-deps: GitHub ubuntu-latest already has Chromium's OS libraries,
         # and apt-get against azure.archive.ubuntu.com can stall until the job timeout.
         run: pnpm --filter @anviq/web exec playwright install chromium
-      - name: Validate E2B credentials
-        if: inputs.sandbox_provider == 'e2b'
-        env:
-          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
-        run: test -n "$E2B_API_KEY"
-      - name: Validate Daytona credentials
-        if: inputs.sandbox_provider == 'daytona'
-        env:
-          DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
-        run: test -n "$DAYTONA_API_KEY"
-      - name: Validate Boat credentials
-        if: inputs.sandbox_provider == 'boat'
-        env:
-          BOAT_API_KEY: ${{ secrets.BOAT_API_KEY }}
-        run: test -n "$BOAT_API_KEY"
+      - name: Install agent-browser
+        timeout-minutes: 2
+        # The page-browser tests run the computer image's helper, which drives Chromium through it.
+        run: |
+          infra/sandboxes/computer/install-agent-browser.sh "$RUNNER_TEMP/agent-browser"
+          echo "ANVIQ_AGENT_BROWSER=$RUNNER_TEMP/agent-browser/agent-browser" >> "$GITHUB_ENV"
       - name: Run Playwright tests
         id: playwright_tests
         env:
-          SANDBOX_TEST_PROVIDER: ${{ inputs.sandbox_provider }}
-          E2B_API_KEY: ${{ inputs.sandbox_provider == 'e2b' && secrets.E2B_API_KEY || '' }}
-          DAYTONA_API_KEY: ${{ inputs.sandbox_provider == 'daytona' && secrets.DAYTONA_API_KEY || '' }}
-          BOAT_API_KEY: ${{ inputs.sandbox_provider == 'boat' && secrets.BOAT_API_KEY || '' }}
-          SHARD: ${{ matrix.shard }}
-        run: pnpm test:e2e -- --sandbox="$SANDBOX_TEST_PROVIDER" --shard="$SHARD/4"
+          SHARD: ${{ matrix.shard }}/${{ inputs.nightly && 4 || 2 }}
+          E2E_SKIP_NIGHTLY: ${{ !inputs.nightly && '1' || '' }}
+        run: pnpm test:e2e -- --shard="$SHARD"
       # Homepage screenshots only: no copy or layout assertions.
       # Runs after product e2e so shared apps/web/test-results is not wiped by the product run.
       - name: Capture marketing homepage screenshots
@@ -112,7 +86,7 @@ jobs:
         run: pnpm --filter @anviq/www e2e
       - name: Upload shard results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playwright-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -127,21 +101,21 @@ jobs:
   playwright:
     name: Web E2E
     needs: shard
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    if: ${{ !cancelled() && !inputs.skip }}
+    runs-on: incredibuild-ubuntu-latest
     timeout-minutes: 10
     concurrency:
       group: ${{ inputs.publish_report && 'playwright-publication' || format('playwright-{0}', github.run_id) }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: playwright-shard-*-${{ github.run_id }}-*
           path: ${{ runner.temp }}/shards
@@ -149,12 +123,13 @@ jobs:
         shell: bash
         env:
           SHARDS: ${{ runner.temp }}/shards
+          SHARD_TOTAL: ${{ inputs.nightly && 4 || 2 }}
         run: |
           set -euo pipefail
           mkdir -p blob-report apps/web/test-results
           missing=0
           # A re-run of failed jobs uploads new attempts only for the shards it re-ran.
-          for shard in 1 2 3 4; do
+          for shard in $(seq 1 "$SHARD_TOTAL"); do
             latest=""
             for attempt in $(seq "$GITHUB_RUN_ATTEMPT" -1 1); do
               candidate="$SHARDS/playwright-shard-$shard-$GITHUB_RUN_ID-$attempt"
@@ -194,7 +169,7 @@ jobs:
           fi
       - name: Upload Playwright artifacts
         if: ${{ !cancelled() && inputs.upload_artifacts }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playwright-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
           path: |

@@ -1,5 +1,42 @@
 import { buildSkillMd } from "@anviq/core";
 
+const ANVIQ_DOCS: ReadonlyArray<readonly [topics: string, url: string]> = [
+  ["Getting started, first bot, what Anviq Agents does", "https://anviq.net/docs.md"],
+  [
+    "Creating bots, chatting, bot settings, sidebar, search",
+    "https://anviq.net/docs/bots-and-chats.md",
+  ],
+  ["Importing an OpenClaw, Hermes or ChatGPT agent", "https://anviq.net/docs/import-an-agent.md"],
+  [
+    "Connecting apps and integrations (Gmail, GitHub, MCP tools)",
+    "https://anviq.net/docs/integrations.md",
+  ],
+  ["Slack, Telegram, WhatsApp and other chat apps", "https://anviq.net/docs/messaging-apps.md"],
+  ["Routines, schedules and triggers", "https://anviq.net/docs/routines.md"],
+  ["The bot's computer, files, using your own computer", "https://anviq.net/docs/computer.md"],
+  ["Memory", "https://anviq.net/docs/memory.md"],
+  ["Skills", "https://anviq.net/docs/skills.md"],
+  ["Approvals, Allow and Block lists", "https://anviq.net/docs/approvals.md"],
+  ["Group chats, bots working together, subagents", "https://anviq.net/docs/groups.md"],
+  ["Voice, calls, spoken replies", "https://anviq.net/docs/voice-and-calls.md"],
+  ["Models, providers, API keys, fallbacks, usage", "https://anviq.net/docs/models.md"],
+  ["Spaces", "https://anviq.net/docs/spaces.md"],
+  ["Saved credentials and website logins", "https://anviq.net/docs/bot-secrets.md"],
+  [
+    "Account, preferences, data export, credits, plans, billing",
+    "https://anviq.net/docs/account.md",
+  ],
+  ["Desktop app", "https://anviq.net/docs/desktop-app.md"],
+  ["Mobile app", "https://anviq.net/docs/mobile-app.md"],
+  ["Bots that create and manage bots", "https://anviq.net/docs/fleet-management.md"],
+  ["Building a plugin", "https://anviq.net/docs/build-a-plugin.md"],
+  ["Self-hosting", "https://anviq.net/docs/self-host.md"],
+  ["Self-hosted server configuration", "https://anviq.net/docs/self-host-configuration.md"],
+];
+
+/** Fixed URLs, so fetching one can't carry anything out of a run. */
+export const ANVIQ_DOCS_URLS = ANVIQ_DOCS.map(([, url]) => url);
+
 /**
  * Built-in Agent Skills (SKILL.md recipes) available to every user.
  * Only generic how-tos; no account-specific content.
@@ -20,6 +57,13 @@ const SKILLS: Array<{ name: string; description: string; body: string }> = [
    - Testing: whether the tests that exist (or were added) actually exercise the risky paths above.
 3. Verify before accusing: for each suspected issue, re-read the code and construct the concrete input or state that triggers the failure. Drop anything you cannot substantiate.
 4. Synthesize a verdict: ship, ship after fixes, or do not ship. List the confirmed findings ordered by severity, each with its location and failure scenario, then any open questions. If nothing survived verification, say so plainly instead of inventing nitpicks.`,
+  },
+  {
+    name: "Anviq Agents",
+    description: "How to use or set up Anviq Agents: chat apps, your computer, billing, hosting",
+    body: `Answer questions about Anviq Agents itself from its docs. Fetch the matching page with web_fetch before answering, then answer briefly in your own words and link the page. If fetching fails or is unavailable, answer only what this index says and link the page. Never invent menus, buttons, or steps the page doesn't show. Account-specific facts (credit balance, plan, usage) aren't in the docs: point to the screen that shows them.
+
+${ANVIQ_DOCS.map(([topics, url]) => `- ${topics}: ${url}`).join("\n")}`,
   },
 ];
 

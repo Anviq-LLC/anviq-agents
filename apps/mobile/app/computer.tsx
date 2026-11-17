@@ -109,7 +109,14 @@ export default function Computer() {
   const [screenReload, setScreenReload] = useState(0);
 
   const embeddedScreenUrl = embeddableScreenUrl(screenUrl, currentApiBase());
-  useEffect(() => setScreenError(null), [embeddedScreenUrl]);
+  // Every screen URL read rotates its token, so only a different stream earns a fresh load.
+  // Clearing on a rotated token reloaded a screen this device cannot reach every few seconds,
+  // and each reload blanked the preview in place of the error.
+  const embeddedScreenStream = embeddedScreenUrl ? screenStreamKey(embeddedScreenUrl) : null;
+  useEffect(() => setScreenError(null), [embeddedScreenStream]);
+  // Without a WebView a dropped URL never fails on its own, so say so instead of a dead preview.
+  const unreachableScreen =
+    computer?.state === "running" && Boolean(screenUrl) && !embeddedScreenUrl;
 
   const hasControl = computer?.controlHolder === "user" && computer.controlBotId === botId;
   // Propped open like a laptop, the desktop stays above the fold and the keys go below it.
@@ -436,11 +443,16 @@ export default function Computer() {
     />
   ) : null;
   const placeholder =
-    screenError ?? previewPlaceholder(computer?.state, booting, name, computer?.mode);
+    screenError ??
+    (unreachableScreen
+      ? t("Could not load the desktop. This device cannot reach the screen URL.")
+      : previewPlaceholder(computer?.state, booting, name, computer?.mode));
   // Booting shows in the preview; the header and Back stay, and leaving lets the boot finish.
   const bootPending = booting || computer?.state === "booting";
   const canRetry = !bootPending && (bootFailed || computer?.state === "error");
-  const screenRetry = computer?.state === "running" && screenOriginError && Boolean(screenError);
+  const screenRetry =
+    unreachableScreen ||
+    (computer?.state === "running" && screenOriginError && Boolean(screenError));
   const retryScreenAction = screenRetry ? (
     <NativeActionButton
       style={{ marginBottom: 16 }}
@@ -796,6 +808,7 @@ function ScreenWebView({
   const sourceUrl = useRef(url);
   sourceUrl.current = retainScreenSource(sourceUrl.current, url);
   const loadedSource = sourceUrl.current;
+  const loadedPageUrl = useRef<string | null>(null);
   const reportStarted = useRef(false);
   const reportCallback = useRef(onScreenState);
   reportCallback.current = onScreenState;
@@ -822,7 +835,11 @@ function ScreenWebView({
         nativeKeyboard && keyboardSession ? computerKeyboardReadyProbe(keyboardSession) : undefined
       }
       onMessage={(event) => {
-        const state = fromScreenPage(event.nativeEvent.url, sourceUrl.current)
+        const state = fromScreenPage(
+          event.nativeEvent.url,
+          sourceUrl.current,
+          loadedPageUrl.current,
+        )
           ? screenPageState(event.nativeEvent.data)
           : null;
         if (state) {
@@ -830,7 +847,10 @@ function ScreenWebView({
           onScreenState?.(state);
         } else if (nativeKeyboard) onKeyboardMessage?.(event.nativeEvent.data);
       }}
-      onLoadStart={onLoadStart}
+      onLoadStart={(event) => {
+        loadedPageUrl.current = event?.nativeEvent?.url ?? null;
+        onLoadStart?.();
+      }}
       style={{ flex: 1, backgroundColor: tokens.background }}
       pointerEvents={interactive ? "auto" : "none"}
       // A view-only screen is a picture: keep its page, including the hidden keyboard field,

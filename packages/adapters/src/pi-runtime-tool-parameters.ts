@@ -1,5 +1,5 @@
 import type { ConnectorTool } from "@anviq/adapter-kit";
-import { BOT_INSTRUCTIONS_MAX_LENGTH } from "@anviq/contracts";
+import { BOT_INSTRUCTIONS_MAX_LENGTH, ThinkingLevelSchema } from "@anviq/contracts";
 import { getLogger } from "@anviq/logging";
 import { Type } from "@earendil-works/pi-ai";
 import {
@@ -75,7 +75,7 @@ function builtinParameters(tool: ConnectorTool) {
     });
   }
   if (tool.name === "remember") {
-    return Type.Object({ content: Type.String(), path: Type.String() });
+    return Type.Object({ content: Type.String(), old_text: Type.Optional(Type.String()) });
   }
   if (tool.name === "shell" || tool.name === "user_computer_shell") {
     return Type.Object({
@@ -95,7 +95,6 @@ function builtinParameters(tool: ConnectorTool) {
   if (tool.name === "spawn_bot") {
     return Type.Object({
       name: Type.String(),
-      title: Type.Optional(Type.String()),
       description: Type.Optional(Type.String()),
       instructions: Type.Optional(Type.String()),
       prompt: Type.Optional(Type.String()),
@@ -105,12 +104,17 @@ function builtinParameters(tool: ConnectorTool) {
   if (tool.name === "update_bot") {
     return Type.Object({
       name: Type.Optional(Type.String()),
-      title: Type.Optional(Type.String()),
       description: Type.Optional(Type.String()),
+      instructions: Type.Optional(Type.String()),
       color: Type.Optional(Type.String()),
       artifact_id: Type.Optional(Type.String()),
       use_attached_image: Type.Optional(Type.Boolean()),
       notifyOnFinish: Type.Optional(Type.Boolean()),
+      dailyCheckIns: Type.Optional(Type.Boolean()),
+      model: Type.Optional(Type.String()),
+      thinkingLevel: Type.Optional(stringEnum(ThinkingLevelSchema.options, {})),
+      readAloud: Type.Optional(Type.Boolean()),
+      voice: Type.Optional(Type.String()),
       bot_id: Type.Optional(Type.String()),
     });
   }
@@ -214,6 +218,18 @@ export function jsonSchemaParameters(
       options,
     ) as unknown as ReturnType<typeof Type.Object>;
   }
+  // A property-less object (`{"type":"object"}`) describes a free-form object, and JSON Schema
+  // treats it identically to `{"type":"object","properties":{}}`. Grammar-constrained tool
+  // decoders do not: Fireworks reads the empty map as "no keys allowed" and emits `{}`, so a
+  // lazily loaded tool's `arguments` arrived empty. Emit the source schema unchanged (minus the
+  // map it never had) unless the object is explicitly closed.
+  if (
+    schema.properties == null &&
+    schema.additionalProperties == null &&
+    schema.patternProperties == null
+  ) {
+    return Type.Unsafe({ ...schema, ...options }) as unknown as ReturnType<typeof Type.Object>;
+  }
   const properties = (schema.properties ?? {}) as Record<string, unknown>;
   const required = new Set(Array.isArray(schema.required) ? schema.required.map(String) : []);
   const fields: Record<string, ReturnType<typeof Type.Optional>> = {};
@@ -223,12 +239,25 @@ export function jsonSchemaParameters(
       typeof Type.Optional
     >;
   }
+  // Nested fields can retain references to definitions on this object.
+  const objectOptions = {
+    ...(schema.$defs !== undefined ? { $defs: schema.$defs } : {}),
+    ...options,
+  };
   // Preserve closed objects (e.g. request_secret destination oneOf branches).
   // Type.Object defaults to open, which would let connectionId+replace match both
   // anyOf variants after conversion.
-  return schema.additionalProperties === false
-    ? Type.Object(fields, { ...options, additionalProperties: false })
-    : Type.Object(fields, options);
+  if (schema.additionalProperties === false) {
+    return Type.Object(fields, { ...objectOptions, additionalProperties: false });
+  }
+  // Several providers' constrained decoders read `{type: "object", properties: {}}` without
+  // `additionalProperties` as closed and can only emit `{}`, so declared open maps (Composio's
+  // COMPOSIO_MULTI_EXECUTE_TOOL `tools[].arguments`) must stay open on the wire. Typed values
+  // are sent as `true`: jsonField cannot express every value schema (`$ref`, patternProperties).
+  if (schema.additionalProperties != null) {
+    return Type.Object(fields, { ...objectOptions, additionalProperties: true });
+  }
+  return Type.Object(fields, objectOptions);
 }
 
 type FieldOptions = { description?: string };
@@ -301,19 +330,26 @@ const FLEET_STRING_ARGS = [
   "group_id",
   "group_name",
   "name",
-  "title",
   "description",
   "color",
   "artifact_id",
   "provider",
   "model",
   "thinking_level",
+  "thinkingLevel",
+  "voice",
   "section",
   "instructions",
   "expected_version",
 ] as const;
 const FLEET_LIST_ARGS = ["bot_ids", "bot_names", "add_bot_ids", "remove_bot_ids"] as const;
-const FLEET_FLAG_ARGS = ["pinned", "clear_section", "clear", "use_attached_image"] as const;
+const FLEET_FLAG_ARGS = [
+  "pinned",
+  "clear_section",
+  "clear",
+  "use_attached_image",
+  "readAloud",
+] as const;
 
 /**
  * Keeps only the fleet and `update_bot` arguments a model sent, coerced to their declared types.
@@ -330,9 +366,7 @@ export function prepareFleetArguments(
   }
   const out: Record<string, unknown> = {};
   for (const key of FLEET_STRING_ARGS) {
-    // update_bot never carries instructions; set_child_instructions does, behind a card.
-    if (toolName === "update_bot" && (key === "instructions" || key === "expected_version"))
-      continue;
+    if (toolName === "update_bot" && key === "expected_version") continue;
     if (argumentGiven(raw[key])) out[key] = String(raw[key]);
   }
   for (const key of FLEET_LIST_ARGS) {
@@ -341,6 +375,7 @@ export function prepareFleetArguments(
   for (const key of FLEET_FLAG_ARGS) {
     if (argumentGiven(raw[key])) out[key] = raw[key];
   }
+  if (argumentGiven(raw.dailyCheckIns)) out.dailyCheckIns = raw.dailyCheckIns;
   const notify = raw.notifyOnFinish ?? raw.notify_on_finish;
   if (argumentGiven(notify)) out.notifyOnFinish = notify;
   return out;
