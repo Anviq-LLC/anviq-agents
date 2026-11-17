@@ -12,7 +12,7 @@ import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
 } from "@anviq/contracts";
 import { MISSING_MODEL_RUN_ERROR } from "@anviq/core";
-import { retireModelCredential } from "@anviq/db";
+import { retireModelCredential, withLinkedBotHome } from "@anviq/db";
 import { cloudflareProviderEnv } from "./cloudflare-ai-gateway.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
 import type { ExecutorDeps } from "./executor-deps.js";
@@ -490,14 +490,25 @@ export async function resolveRunModel(
   },
 ): Promise<AgentRunRequest["model"]> {
   const override = scope.botId
-    ? await deps.prisma.bot.findFirst({
-        where: {
-          id: scope.botId,
-          userId: scope.userId,
-          spaceId: scope.spaceId,
-        },
-        select: { modelProvider: true, modelId: true, thinkingLevel: true },
-      })
+    ? await deps.prisma.bot
+        .findFirst({
+          where: {
+            id: scope.botId,
+            userId: scope.userId,
+            spaceId: scope.spaceId,
+            linkedFromBotId: undefined,
+          },
+          select: {
+            modelProvider: true,
+            modelId: true,
+            thinkingLevel: true,
+            linkedFromBotId: true,
+            userId: true,
+            selfUpdateInstructions: true,
+          },
+        })
+        // A linked bot answers with the model of the bot behind its link.
+        .then((row) => (row ? withLinkedBotHome(deps.prisma, row) : null))
     : null;
   const hasOverride = Boolean(override?.modelProvider && override.modelId);
   const [overrideCredential, main, settings] = await Promise.all([

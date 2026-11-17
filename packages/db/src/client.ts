@@ -113,12 +113,12 @@ export function createDb(
   });
   // Row-level security wraps everything else, so its findUnique rewrite still runs
   // through content encryption. Text is cleaned for Postgres before any of them see it.
-  const prisma = withLinkedBotsHidden(
-    withTextSanitization(
-      withRowLevelSecurity(
-        withContentEncryption(client, contentKeys),
-        rlsBypassKey(connectionString),
-      ),
+  // The link filter sits inside row-level security, which answers unique lookups itself by
+  // running them on the client it wraps.
+  const prisma = withTextSanitization(
+    withRowLevelSecurity(
+      withLinkedBotsHidden(withContentEncryption(client, contentKeys)),
+      rlsBypassKey(connectionString),
     ),
   );
   return { prisma, pool, contentKeys };

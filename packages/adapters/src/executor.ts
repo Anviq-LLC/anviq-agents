@@ -37,6 +37,7 @@ import {
   recordUsage,
   settleReleasedTakeoverCards,
   spaceHasModelAccess,
+  withLinkedBotHome,
 } from "@anviq/db";
 import { enrichLogContext, getLogger } from "@anviq/logging";
 import { sanitizedError } from "@anviq/logging/monitoring";
@@ -271,7 +272,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
       });
       if (started.count !== 1) return;
       const leaseTarget = await deps.prisma.bot.findUniqueOrThrow({
-        where: { id: run.botId },
+        where: { id: run.botId, linkedFromBotId: undefined },
         select: {
           computerId: true,
           computerSwitching: true,
@@ -418,10 +419,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           savedLoginPasswordRedactions,
           purchaseRedactions,
         ] = await Promise.all([
-          deps.prisma.bot.findUniqueOrThrow({
-            where: { id: run.botId },
-            include: { computer: true },
-          }),
+          deps.prisma.bot
+            .findUniqueOrThrow({
+              where: { id: run.botId, linkedFromBotId: undefined },
+              include: { computer: true },
+            })
+            .then((row) => withLinkedBotHome(deps.prisma, row)),
           deps.prisma.thread.findUniqueOrThrow({ where: { id: run.threadId } }),
           loadRunHistoryMessages(deps.prisma, run, LEGACY_HISTORY_WINDOW_SIZE, channelId),
           run.trigger === "bot_message"
@@ -1614,7 +1617,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           (await setupFailureStreak(deps.prisma, runId)) >= RUN_SETUP_FAILURE_LIMIT - 1
         ) {
           const bot = await deps.prisma.bot.findUnique({
-            where: { id: run.botId },
+            where: { id: run.botId, linkedFromBotId: undefined },
             select: { name: true },
           });
           await failRunBeforeTurn(

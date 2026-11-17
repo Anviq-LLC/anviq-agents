@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { withoutLinkedBots } from "./linked-bots.js";
+import { describe, expect, it, vi } from "vitest";
+import type { PrismaClient } from "./client.js";
+import { withLinkedBotHome, withoutLinkedBots } from "./linked-bots.js";
 
 describe("withoutLinkedBots", () => {
   it("leaves link rows out of reads, counts and bulk writes", () => {
@@ -42,5 +43,67 @@ describe("withoutLinkedBots", () => {
     const args = { where: { id: "b" }, data: { name: "n" } };
     for (const operation of ["update", "create", "delete", "upsert", "createMany"])
       expect(withoutLinkedBots(operation, args), operation).toBe(args);
+  });
+});
+
+describe("withLinkedBotHome", () => {
+  const link = {
+    id: "link",
+    userId: "owner",
+    linkedFromBotId: "home",
+    selfUpdateInstructions: true,
+    instructions: "",
+    modelProvider: null,
+    modelId: null,
+    thinkingLevel: null,
+    disabledBuiltinTools: [] as string[],
+  };
+  const prismaWith = (home: unknown) =>
+    ({ bot: { findFirst: vi.fn(async () => home) } }) as unknown as PrismaClient;
+
+  it("answers with the persona and model of the bot behind the link, and never rewrites it", async () => {
+    const prisma = prismaWith({
+      instructions: "Be brief.",
+      modelProvider: "p",
+      modelId: "m",
+      thinkingLevel: "low",
+      disabledBuiltinTools: ["shell"],
+    });
+    expect(await withLinkedBotHome(prisma, link)).toMatchObject({
+      id: "link",
+      instructions: "Be brief.",
+      modelProvider: "p",
+      modelId: "m",
+      thinkingLevel: "low",
+      disabledBuiltinTools: ["shell"],
+      selfUpdateInstructions: false,
+    });
+  });
+
+  it("reads the original for its owner only, while it is not archived", async () => {
+    const prisma = prismaWith({
+      instructions: "",
+      modelProvider: null,
+      modelId: null,
+      thinkingLevel: null,
+      disabledBuiltinTools: [],
+    });
+    await withLinkedBotHome(prisma, link);
+    expect(prisma.bot.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "home", userId: "owner", archivedAt: null, linkedFromBotId: null },
+      }),
+    );
+  });
+
+  it("fails the run when the bot behind the link is gone", async () => {
+    await expect(withLinkedBotHome(prismaWith(null), link)).rejects.toThrow("no longer available");
+  });
+
+  it("returns an ordinary bot as it is, without reading anything", async () => {
+    const prisma = prismaWith(null);
+    const bot = { ...link, linkedFromBotId: null };
+    expect(await withLinkedBotHome(prisma, bot)).toBe(bot);
+    expect(prisma.bot.findFirst).not.toHaveBeenCalled();
   });
 });

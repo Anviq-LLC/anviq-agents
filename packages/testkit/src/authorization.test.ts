@@ -157,6 +157,7 @@ describeWithDatabase("API authorization and resource isolation", () => {
       ["spaces/rename", { spaceId: "missing-space", name: "Nope" }],
       ["spaces/remove", { spaceId: "missing-space" }],
       ["bots/list"],
+      ["bots/linkable"],
       ["bots/listArchived"],
       ["bots/get", { botId: "missing-bot" }],
       ["bots/create", botInput("Unauthenticated")],

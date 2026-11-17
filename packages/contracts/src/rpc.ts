@@ -83,6 +83,7 @@ import {
   GroupDetailSchema,
   GroupSchema,
   IntegrationCatalogResultSchema,
+  LinkableBotSchema,
   McpServerConfigInput,
   McpServerSchema,
   MemoryDocumentSchema,
@@ -466,6 +467,7 @@ export const appContract = {
   },
   bots: {
     list: oc.output(z.array(BotSchema)),
+    linkable: oc.output(z.array(LinkableBotSchema)),
     listArchived: oc.output(z.array(BotSchema)),
     get: oc.input(botId).output(BotSchema),
     create: oc.input(CreateBotInput).output(BotSchema),

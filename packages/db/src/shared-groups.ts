@@ -172,6 +172,7 @@ export async function setMyBotsInSharedGroup(
           spaceId: actor.spaceId,
           userId: actor.userId,
           archivedAt: null,
+          linkedFromBotId: undefined,
         },
       });
       if (owned !== wanted.length) throw new OrganizationError("NOT_FOUND", "Bot not found");

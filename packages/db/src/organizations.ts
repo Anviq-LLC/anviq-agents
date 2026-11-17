@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
+import { unlinkBotsInOrganization } from "./linked-bot-lifecycle.js";
 import { createSpace, createSpaceDefaults } from "./spaces.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
@@ -513,7 +514,7 @@ async function activeBotCount(
 export async function removeMember(
   prisma: PrismaClient,
   input: { userId: string; organizationId: string; targetUserId: string },
-): Promise<void> {
+): Promise<{ cancelledRunIds: string[] }> {
   const actorRole = await managerOf(prisma, input.userId, input.organizationId);
   if (input.targetUserId === input.userId)
     throw new OrganizationError("INVALID", "Use leave to remove yourself");
@@ -531,13 +532,18 @@ export async function removeMember(
       "CONFLICT",
       "Their bots are still active in this team; they need to archive or delete them first",
     );
+  const unlinked = await unlinkBotsInOrganization(prisma, {
+    organizationId: input.organizationId,
+    userId: input.targetUserId,
+  });
   await prisma.member.delete({ where: { id: target.id } });
+  return unlinked;
 }
 
 export async function leaveOrganization(
   prisma: PrismaClient,
   input: { userId: string; organizationId: string },
-): Promise<void> {
+): Promise<{ cancelledRunIds: string[] }> {
   const role = await membership(prisma, input.userId, input.organizationId);
   if (role === "owner") {
     const otherOwners = await prisma.member.count({
@@ -555,11 +561,13 @@ export async function leaveOrganization(
       "CONFLICT",
       "Archive or delete your bots in this team before leaving",
     );
+  const unlinked = await unlinkBotsInOrganization(prisma, input);
   await prisma.member.delete({
     where: {
       organizationId_userId: { organizationId: input.organizationId, userId: input.userId },
     },
   });
+  return unlinked;
 }
 
 /** A team cannot be left without an owner by deleting an account. */

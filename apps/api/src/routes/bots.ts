@@ -29,9 +29,11 @@ import {
   InstructionConflictError,
   IsolationError,
   leaveSharedGroup,
+  listLinkableBots,
   recordComputerRunEnd,
   recordOrganizationEvent,
   recordSecurityEvent,
+  resolveGroupBotIds,
   restoreBotUnderComputerQuota,
   SpaceDeletionInProgressError,
   setGroupParticipants,
@@ -251,6 +253,9 @@ export function botsRoutes(ctx: RouterContext) {
   return {
     bots: {
       list: authed.bots.list.handler(async ({ context }) => repos.listBots(context.actor)),
+      linkable: authed.bots.linkable.handler(async ({ context }) =>
+        listLinkableBots(deps.prisma, context.actor),
+      ),
       listArchived: authed.bots.listArchived.handler(async ({ context }) =>
         repos.listBots(context.actor, { archived: true }),
       ),
@@ -580,7 +585,10 @@ export function botsRoutes(ctx: RouterContext) {
     groups: {
       create: authed.groups.create.handler(async ({ context, input }) => {
         try {
-          return await groupRepos.createGroup(context.actor, input);
+          return await groupRepos.createGroup(context.actor, {
+            ...input,
+            botIds: await resolveGroupBotIds(deps.prisma, context.actor, input.botIds),
+          });
         } catch (error) {
           throw mapSpaceLifecycleError(error);
         }
@@ -644,8 +652,9 @@ export function botsRoutes(ctx: RouterContext) {
         return { ok: true as const };
       }),
       setMyBots: authed.groups.setMyBots.handler(async ({ context, input }) => {
+        const botIds = await resolveGroupBotIds(deps.prisma, context.actor, input.botIds);
         const { cancelledRunIds } = await reportRules(() =>
-          setMyBotsInSharedGroup(deps.prisma, context.actor, input),
+          setMyBotsInSharedGroup(deps.prisma, context.actor, { ...input, botIds }),
         );
         await cancelRunJobs(cancelledRunIds);
         return groupRepos.mapGroup(
@@ -665,7 +674,12 @@ export function botsRoutes(ctx: RouterContext) {
           });
           if (!section) throw new IsolationError();
         }
-        const updated = await groupRepos.updateGroup(context.actor, input);
+        const updated = await groupRepos.updateGroup(context.actor, {
+          ...input,
+          ...(input.botIds
+            ? { botIds: await resolveGroupBotIds(deps.prisma, context.actor, input.botIds) }
+            : {}),
+        });
         await Promise.all(
           updated.cancelledRunIds.map((runId) =>
             deps.jobs.cancel(runJobKey(runId)).catch(() => undefined),

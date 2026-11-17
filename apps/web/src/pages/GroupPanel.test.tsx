@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 
-import type { Bot, Group } from "@anviq/contracts";
+import type { Bot, Group, LinkableBot } from "@anviq/contracts";
 import type * as UiWeb from "@anviq/ui-web";
 import type { ComponentProps, ReactNode } from "react";
 import { act } from "react";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const linkable = vi.fn<() => Promise<LinkableBot[]>>(async () => []);
+vi.mock("../lib/rpc", () => ({
+  rpc: { bots: { linkable: () => linkable() } },
+}));
 
 vi.mock("@lingui/react/macro", () => {
   const t = (parts: TemplateStringsArray, ...values: unknown[]) =>
@@ -50,7 +55,7 @@ vi.mock("@anviq/ui-web", async (importOriginal) => {
   };
 });
 
-import { GroupSettings } from "./GroupPanel";
+import { CreateGroupForm, GroupSettings } from "./GroupPanel";
 
 const group: Group = {
   id: "group-1",
@@ -186,6 +191,8 @@ async function pressEscape(isComposing = false) {
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  linkable.mockReset();
+  linkable.mockResolvedValue([]);
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -450,5 +457,118 @@ describe("GroupSettings people", () => {
     expect(onSetMyBots).toHaveBeenLastCalledWith(["bot-2", "bot-3"]);
     await toggle("Remove Writer from the chat");
     expect(onSetMyBots).toHaveBeenLastCalledWith([]);
+  });
+
+  it("lets a guest choose their personal bots from other spaces", async () => {
+    const personalBot: LinkableBot = {
+      id: "personal-1",
+      name: "Analyst",
+      title: "Reads sheets",
+      color: "orange",
+      spaceId: "space-personal",
+      spaceName: "Personal",
+      linkedBotId: "link-1",
+    };
+    const otherPersonal: LinkableBot = {
+      id: "personal-2",
+      name: "Planner",
+      title: "Plans sprints",
+      color: "purple",
+      spaceId: "space-personal",
+      spaceName: "Personal",
+      linkedBotId: null,
+    };
+    linkable.mockResolvedValue([personalBot, otherPersonal]);
+    const onSetMyBots = vi.fn(async () => undefined);
+    const shared: Group = {
+      ...group,
+      members: [
+        { botId: "bot-1", name: "Researcher", color: "blue", ownerUserId: "ana" },
+        { botId: "link-1", name: "Analyst", color: "orange", ownerUserId: "ben" },
+      ],
+      canManage: false,
+      participants: [
+        { userId: "ana", name: "Ana", host: true },
+        { userId: "ben", name: "Ben", host: false },
+      ],
+    };
+    await render({ group: shared, bots: [], onSetMyBots });
+    await vi.waitFor(() => expect(container.textContent).toContain("Personal"));
+    await toggle("Add Planner to the chat");
+    expect(onSetMyBots).toHaveBeenLastCalledWith(["link-1", "personal-2"]);
+    await toggle("Remove Analyst from the chat");
+    expect(onSetMyBots).toHaveBeenLastCalledWith([]);
+  });
+});
+
+describe("linkable bots in group member pickers", () => {
+  const linkableBots: LinkableBot[] = [
+    {
+      id: "personal-1",
+      name: "Analyst",
+      title: "Reads sheets",
+      color: "orange",
+      spaceId: "space-personal",
+      spaceName: "Personal",
+      linkedBotId: "link-1",
+    },
+    {
+      id: "personal-2",
+      name: "Planner",
+      title: "Plans sprints",
+      color: "purple",
+      spaceId: "space-personal",
+      spaceName: "Personal",
+      linkedBotId: null,
+    },
+  ];
+
+  it("lists linkable bots with their home space in CreateGroupForm and passes picked ids", async () => {
+    linkable.mockResolvedValue(linkableBots);
+    const onCreate = vi.fn(async () => undefined);
+    await act(async () => {
+      root.render(<CreateGroupForm bots={bots} onCancel={vi.fn()} onCreate={onCreate} />);
+    });
+    await vi.waitFor(() => expect(container.textContent).toContain("Personal"));
+    const nameInput = container.querySelector<HTMLInputElement>("input")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        nameInput,
+        "Cross-space crew",
+      );
+      nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await toggle("Add Analyst to the group");
+    await toggle("Add Planner to the group");
+    await click("Create group");
+    expect(onCreate).toHaveBeenCalledWith({
+      name: "Cross-space crew",
+      botIds: ["link-1", "personal-2"],
+    });
+  });
+
+  it("shows an already-linked member when collapsed and saves added linkable bots in GroupSettings", async () => {
+    linkable.mockResolvedValue(linkableBots);
+    const onSave = vi.fn(async () => undefined);
+    const onOpenBot = vi.fn();
+    const withLink: Group = {
+      ...group,
+      members: [
+        { botId: "bot-1", name: "Researcher", color: "blue" },
+        { botId: "link-1", name: "Analyst", color: "orange" },
+      ],
+    };
+    await render({ group: withLink, onSave, onOpenBot });
+    await vi.waitFor(() => expect(container.textContent).toContain("Analyst"));
+    expect(container.textContent).toContain("Personal");
+    expect(container.textContent).not.toContain("Planner");
+    await click("Show all");
+    expect(container.textContent).toContain("Planner");
+    await toggle("Add Planner to the group");
+    await click("Save");
+    expect(onSave).toHaveBeenCalledWith({
+      name: undefined,
+      botIds: ["bot-1", "link-1", "personal-2"],
+    });
   });
 });

@@ -1,4 +1,6 @@
 // Copyright 2026 Anviq LLC. All rights reserved.
+
+import { runJobKey } from "@anviq/adapter-kit";
 import { teamInvitationEmail } from "@anviq/auth";
 import {
   acceptInvitation,
@@ -61,6 +63,8 @@ const done = { ok: true as const };
 export function organizationsRoutes(ctx: RouterContext) {
   const { deps, authed } = ctx;
   const prisma = deps.prisma;
+  const cancelRunJobs = (runIds: string[]) =>
+    Promise.all(runIds.map((runId) => deps.jobs.cancel(runJobKey(runId)).catch(() => undefined)));
   const system = <T>(work: () => Promise<T>) =>
     reportRules(() => runAsSystem("team membership", work));
   const note = (
@@ -129,21 +133,23 @@ export function organizationsRoutes(ctx: RouterContext) {
       ),
       removeMember: authed.organizations.removeMember.handler(({ context, input }) =>
         system(async () => {
-          await removeMember(prisma, {
+          const { cancelledRunIds } = await removeMember(prisma, {
             userId: context.actor.userId,
             organizationId: input.organizationId,
             targetUserId: input.userId,
           });
+          await cancelRunJobs(cancelledRunIds);
           await note(context.actor.userId, input.organizationId, "member.removed", input.userId);
           return done;
         }),
       ),
       leave: authed.organizations.leave.handler(({ context, input }) =>
         system(async () => {
-          await leaveOrganization(prisma, {
+          const { cancelledRunIds } = await leaveOrganization(prisma, {
             userId: context.actor.userId,
             organizationId: input.organizationId,
           });
+          await cancelRunJobs(cancelledRunIds);
           await note(context.actor.userId, input.organizationId, "member.left");
           return done;
         }),
