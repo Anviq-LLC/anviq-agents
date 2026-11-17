@@ -20,6 +20,7 @@
       "!**/test-report",
       "!**/verify-report",
       "!**/data",
+      "!**/graphify-out",
       "!**/*.astro"
     ]
   },
