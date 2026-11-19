@@ -24,7 +24,6 @@ export function IntegrationKeysSettings() {
         <ProviderSettingsForm
           key={`${primary.id}:${primary.configured}`}
           fields={primary.fields ?? []}
-          saved={primary.configured ? {} : undefined}
           busy={save.pending}
           connectLabel={t`Save`}
           advancedSettings={null}
@@ -46,7 +45,6 @@ export function IntegrationKeysSettings() {
           <div className="mt-3">
             <ProviderSettingsForm
               fields={provider.fields ?? []}
-              saved={provider.configured ? {} : undefined}
               busy={save.pending}
               connectLabel={t`Save`}
               advancedSettings={null}
