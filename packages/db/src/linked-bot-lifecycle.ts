@@ -1,5 +1,5 @@
-import { cancelRunsInTransaction } from "./cancel-runs.js";
-import type { PrismaClient } from "./client.js";
+import type { PrismaClient } from "./database/client.js";
+import { cancelRunsInTransaction } from "./runs/cancel-runs.js";
 
 const ACTIVE_RUN_STATUSES = ["queued", "leased", "running", "waiting_input", "waiting_takeover"];
 

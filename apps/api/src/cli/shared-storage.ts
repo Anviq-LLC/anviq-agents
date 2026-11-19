@@ -8,8 +8,8 @@ import {
   PrismaPushTokenStore,
   unwrapEnvFromKeyManager,
 } from "@anviq/adapters";
-import { resolveEncryptionKey } from "@anviq/core";
 import { loadRootEnv } from "@anviq/core/node/load-root-env";
+import { resolveEncryptionKey } from "@anviq/core/node/secrets-guard";
 import { createDb } from "@anviq/db";
 
 loadRootEnv();

@@ -24,25 +24,25 @@ export const ZH_CN_MESSAGES: Record<string, string> = {
   "Enter this code in Anviq Agents to confirm it's you:":
     "在 Anviq Agents 中输入此验证码以确认是你本人：",
   "Welcome to Anviq Agents": "欢迎使用 Anviq Agents",
-  "Thanks for signing up for Anviq Agents.": "感谢你注册 Anviq Agents。",
-  "Anviq Agents also has apps for": "Anviq Agents 还提供以下平台的应用：",
-  "Questions or ideas?": "有问题或想法？",
-  "Join us on Discord": "加入我们的 Discord",
-  "Anviq Agents is open source. If you like it,": "Anviq Agents 是开源项目。如果你喜欢它，",
-  "a star on GitHub": "在 GitHub 上点个星标",
-  "helps others find it.": "可以帮助更多人发现它。",
-  "Want to run it on your own servers?": "想在自己的服务器上运行？",
-  "Self-host Anviq Agents": "自行托管 Anviq Agents",
-  "Have any questions? Reply to this email.": "有任何问题？请回复此邮件。",
+  "Welcome to Anviq Agents. The people who get the most out of it do three things:":
+    "欢迎使用 Anviq Agents。用得最好的人都会做三件事：",
+  "Get the apps": "下载应用",
+  "Anviq Agents runs on {platforms}, so your bots can reach you wherever you are.":
+    "Anviq Agents 支持 {platforms}，让你的机器人随时随地都能联系到你。",
+  "Join the community": "加入社区",
+  "See what others are building, get help fast, and tell us what to build next on {discord}.":
+    "在 {discord} 上看看别人在构建什么，快速获得帮助，并告诉我们接下来该做什么。",
+  "Star us on GitHub": "在 GitHub 上给我们加星",
+  "Anviq Agents is open source. {star} helps more people find it.":
+    "Anviq Agents 是开源的。{star}能帮助更多人发现它。",
+  "A star on GitHub": "在 GitHub 上加星",
+  "Questions? Just reply. I read every one.": "有问题？直接回复即可。每封我都会看。",
   Unsubscribe: "退订",
   "Invite a friend": "邀请好友",
   "Invite a friend to Anviq Agents: they get {weeks} weeks free, and you earn a free month when they start a qualifying subscription with a new card.":
     "邀请朋友加入 Anviq Agents：对方可免费使用 {weeks} 周；当对方用新卡开始符合条件的订阅时，你将获得一个月免费。",
   "Open Anviq Agents": "打开 Anviq Agents",
   "and choose Invite friends for your link.": "并选择“邀请好友”获取你的链接。",
-  "Have any questions? Just reply to this email.": "有任何问题？直接回复此邮件即可。",
-  "If you're enjoying Anviq Agents,": "如果你喜欢 Anviq Agents，",
-  "give us a star on GitHub": "欢迎在 GitHub 上给我们点个星标",
   "We received your Anviq Agents plugin": "我们已收到你的 Anviq Agents 插件",
   "Thanks for submitting a plugin to the Anviq Agents marketplace.":
     "感谢你向 Anviq Agents 插件市场提交插件。",
@@ -64,4 +64,34 @@ export const ZH_CN_MESSAGES: Record<string, string> = {
   "Your Anviq Agents page claim: {name}": "你在 Anviq Agents 的页面认领：{name}",
   "Your changes to the {name} page are approved.": "你对 {name} 页面的修改已获批准。",
   "We couldn't approve your changes to the {name} page.": "我们无法批准你对 {name} 页面的修改。",
+  "Your saved computer files will be deleted": "你保存的电脑文件将被删除",
+  "Your saved computer files will be deleted on {date} unless you resubscribe.":
+    "除非你重新订阅，否则你保存的电脑文件将于 {date} 被删除。",
+  "Your saved computer files will be deleted on {date} unless you choose a plan.":
+    "除非你选择一个套餐，否则你保存的电脑文件将于 {date} 被删除。",
+  "{inviter} invited you to {organization} on Anviq Agents":
+    "{inviter} 邀请你加入 Anviq Agents 上的 {organization}",
+  "{inviter} invited you to join {organization} on Anviq Agents.":
+    "{inviter} 邀请你加入 Anviq Agents 上的 {organization}。",
+  "Join {organization}": "加入 {organization}",
+  "This invitation expires in 7 days. Sign in with this email address to accept it.":
+    "此邀请将在 7 天后过期。请使用此邮箱地址登录以接受邀请。",
+  "{inviter} invited you to {space} on Anviq Agents":
+    "{inviter} 邀请你加入 Anviq Agents 上的 {space}",
+  "{inviter} invited you to join {space} on Anviq Agents.":
+    "{inviter} 邀请你加入 Anviq Agents 上的 {space}。",
+  "Join {space}": "加入 {space}",
+  "This invitation expires in 7 days.": "此邀请将在 7 天后过期。",
+  "Connect a model to start using Anviq Agents": "连接模型即可开始使用 Anviq Agents",
+  "Your Anviq Agents plan has started, but your bots can't reply until a model is connected.":
+    "你的 Anviq Agents 套餐已开始，但在连接模型之前，你的机器人无法回复。",
+  "Sign in with your {subscriptions} subscription, or paste an API key.":
+    "使用你的 {subscriptions} 订阅登录，或粘贴 API 密钥。",
+  "Connect a model": "连接模型",
+  "Bring your old assistant to Anviq Agents": "把你原来的助手带到 Anviq Agents",
+  "Already set up an assistant in {assistants}? Anviq Agents can bring over its instructions, memory, skills and routines as a new bot, so you don't start again.":
+    "已经在 {assistants} 里设置过助手？Anviq Agents 可以把它的指令、记忆、技能和例行任务带过来，成为一个新的机器人，你不必从头开始。",
+  "It works for any other assistant too: send it one prompt and paste its reply.":
+    "其他任何助手也可以：给它发送一条提示词，再粘贴它的回复。",
+  "Import an agent": "导入智能体",
 };

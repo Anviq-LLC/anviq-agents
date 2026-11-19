@@ -7,6 +7,8 @@ import {
   screenPorts,
 } from "@anviq/core/node/desktop-runtime";
 import type Docker from "dockerode";
+import type { ComputerLocale } from "./computer-locale.js";
+import { computerLocaleEnv } from "./computer-locale.js";
 
 /**
  * The computer image. ANVIQ_COMPUTER_IMAGE_TAG is appended the way Compose does, so a
@@ -30,6 +32,7 @@ export const COMPUTER_IMAGE = resolveComputerImage();
 /** The files from infra/sandboxes/computer the supervisor sends when it builds the image locally. */
 export const COMPUTER_IMAGE_CONTEXT_FILES = [
   "Dockerfile",
+  "apt-security.sh",
   "start.sh",
   "user-env.sh",
   "control.py",
@@ -247,6 +250,86 @@ export function computerDnsMatches(current: string[] | null | undefined, desired
   return have.length === want.length && have.every((server, index) => server === want[index]);
 }
 
+/** The computer environment variable anviq-browser reads for --proxy-pac-url. */
+export const BROWSER_PROXY_PAC_ENV = "ANVIQ_BROWSER_PROXY_PAC_URL";
+// Chromium takes the PAC script as one argument; a data: URL holds the whole script.
+const MAX_BROWSER_PROXY_PAC_URL_LENGTH = 64 * 1024;
+const BROWSER_PROXY_PAC_PROTOCOLS: Record<string, true> = {
+  "http:": true,
+  "https:": true,
+  "data:": true,
+};
+
+/**
+ * Proxy auto-config (PAC) script for the bot browser, from SANDBOX_COMPUTER_BROWSER_PROXY_PAC_URL:
+ * an absolute http://, https:// or data: URL. The script decides per request which sites go
+ * through a proxy and which connect directly. Unset leaves the browser's connections as they are.
+ */
+export function resolveComputerBrowserProxyPacUrl(
+  value = process.env.SANDBOX_COMPUTER_BROWSER_PROXY_PAC_URL,
+): string | undefined {
+  const raw = (value ?? "").trim();
+  if (!raw) return undefined;
+  const fail = (reason: string) =>
+    new Error(`Unsupported SANDBOX_COMPUTER_BROWSER_PROXY_PAC_URL: ${reason}`);
+  if (raw.length > MAX_BROWSER_PROXY_PAC_URL_LENGTH) throw fail("longer than 64 KiB");
+  // The browser launcher passes it as a single flag, so it cannot hold spaces.
+  if (/\s/.test(raw) || [...raw].some((char) => char <= " " || char === "\u007f"))
+    throw fail("contains whitespace or control characters (base64-encode a data: URL)");
+  let protocol: string;
+  try {
+    protocol = new URL(raw).protocol;
+  } catch {
+    throw fail("expected an absolute http://, https:// or data: URL");
+  }
+  if (!BROWSER_PROXY_PAC_PROTOCOLS[protocol])
+    throw fail(`expected an http://, https:// or data: URL, received ${protocol}`);
+  return raw;
+}
+
+/** Whether a computer's environment carries the configured PAC URL (none configured: none set). */
+export function computerBrowserProxyPacMatches(
+  env: string[] | null | undefined,
+  desired?: string,
+): boolean {
+  const prefix = `${BROWSER_PROXY_PAC_ENV}=`;
+  const have = (env ?? []).filter((entry) => entry.startsWith(prefix));
+  if (desired === undefined) return have.length === 0;
+  return have.length === 1 && have[0] === `${prefix}${desired}`;
+}
+
+/**
+ * Host GPUs every computer may compute on, from SANDBOX_COMPUTER_COMPUTE_GPUS: `all` or a
+ * positive count, as in `docker run --gpus`. Unset gives computers no GPU. Returns Docker's
+ * device count, where -1 means all.
+ */
+export function resolveComputerComputeGpus(
+  value = process.env.SANDBOX_COMPUTER_COMPUTE_GPUS,
+): number | undefined {
+  const raw = (value ?? "").trim();
+  if (!raw) return undefined;
+  if (raw === "all") return -1;
+  const count = /^[1-9]\d*$/.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isSafeInteger(count))
+    throw new Error(
+      `Unsupported SANDBOX_COMPUTER_COMPUTE_GPUS: "${raw}" (expected all or a positive count)`,
+    );
+  return count;
+}
+
+/**
+ * Whether a container was created with the configured GPUs. Devices are fixed when a container
+ * is created, so turning the setting on or off, or changing the count, replaces the computer.
+ */
+export function computerComputeGpusMatch(
+  current: Docker.DeviceRequest[] | null | undefined,
+  desired?: number,
+) {
+  const requests = current ?? [];
+  if (desired === undefined) return requests.length === 0;
+  return requests.length === 1 && requests[0]?.Count === desired;
+}
+
 /** A host directory mounted into every computer (SANDBOX_COMPUTER_MOUNTS). */
 export interface ComputerMount {
   source: string;
@@ -438,15 +521,43 @@ export function computerNetworkOwnerFor(
   return createHash("sha256").update(root).digest("hex").slice(0, 32);
 }
 
+/**
+ * Whether a network-create failure means this daemon may be unable to create
+ * dual-stack networks: every capability error the daemon emits names IPv6 or
+ * ip6tables ("could not find an available, non-overlapping IPv6 address pool…",
+ * "Unable to enable IPv6 addresses on bridge…", "ip6tables is missing", "IPv6
+ * global forwarding is disabled"), and the exact wording changes between
+ * releases, so match broadly. A transient error that happens to name ip6tables
+ * falls back too, but the fallback is bounded: a stop gives the network back
+ * (reclaimComputerNetwork) and the next start creates it again, retrying IPv6.
+ * Every other error surfaces, so a transient failure fails loudly and retries.
+ */
+export function isIpv6NetworkUnavailable(error: unknown): boolean {
+  return /ipv6|ip6tables/i.test(String(error));
+}
+
+/**
+ * IPv6 for computer networks, open egress only: Docker 27+ allocates each network
+ * its own ULA /64 when no subnet is given and, with ip6tables on by default,
+ * masquerades outbound traffic through the host's IPv6 address. A ULA source keeps
+ * IPv4 preferred for dual-stack names (RFC 6724), so only IPv6-only destinations
+ * move to IPv6. Restricted egress stays IPv4-only: the host ruleset and the
+ * startup probe (egress-probe.ts) enforce and verify IPv4 only. Daemons that
+ * cannot create the dual-stack network (Docker 26, Docker-in-Docker without
+ * ip6_tables, IPv6 off in the kernel) get the same network without IPv6 from
+ * the caller's fallback, so a computer start never fails on this.
+ */
 export function computerNetworkCreateOptions(
   botId: string,
   owner: string,
   egress: ComputerEgressMode = "open",
+  ipv6 = true,
 ) {
   return {
     Name: computerNetworkNameFor(botId),
     Driver: "bridge",
     CheckDuplicate: true,
+    ...(ipv6 && egress === "open" ? { EnableIPv6: true } : {}),
     Labels: { "anviq.netputerOwner": owner, "anviq.botId": botId },
     ...(egress === "restricted"
       ? { Options: { "com.docker.network.bridge.name": computerBridgeNameFor(botId) } }
@@ -552,6 +663,11 @@ export interface ComputerCreateInput {
   publishControlPort?: boolean;
   dns?: string[];
   mounts?: ComputerMount[];
+  /** Docker's GPU device count, where -1 means all (see resolveComputerComputeGpus). */
+  computeGpus?: number;
+  /** PAC URL for the bot browser (see resolveComputerBrowserProxyPacUrl). */
+  browserProxyPacUrl?: string;
+  locale?: ComputerLocale;
 }
 
 interface PointerInput {
@@ -583,6 +699,8 @@ export function containerCreateOptions(input: ComputerCreateInput) {
       "NPM_CONFIG_PREFIX=/home/anviq/.local",
       "PIP_USER=1",
       ...(input.controlToken ? [`ANVIQ_COMPUTER_CONTROL_TOKEN=${input.controlToken}`] : []),
+      ...computerLocaleEnv(input.locale),
+      ...(input.browserProxyPacUrl ? [`${BROWSER_PROXY_PAC_ENV}=${input.browserProxyPacUrl}`] : []),
     ],
     Labels: {
       "anviq.managed": "true",
@@ -622,6 +740,10 @@ export function containerCreateOptions(input: ComputerCreateInput) {
       AutoRemove: false,
       NetworkMode: input.networkMode ?? "bridge",
       ...(input.dns ? { Dns: input.dns } : {}),
+      // No driver named: Docker picks whichever one on the host provides GPUs.
+      ...(input.computeGpus !== undefined
+        ? { DeviceRequests: [{ Count: input.computeGpus, Capabilities: [["gpu"]] }] }
+        : {}),
     },
     WorkingDir: "/home/anviq",
   };

@@ -1,4 +1,4 @@
-import type { CSSProperties, MouseEvent, ReactNode, RefObject } from "react";
+import type { CSSProperties, MouseEvent, ReactElement, ReactNode, RefObject } from "react";
 import {
   Component,
   createContext,
@@ -30,6 +30,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  CopyTextFallback,
+  useCopyText,
 } from "@anviq/ui-web";
 import { CheckIcon, CopyIcon, GlobeIcon, ImageIcon } from "./icons";
 import type { ChatMarkdownProps } from "./markdown";
@@ -80,30 +82,25 @@ function preserveSkippedTableText() {
 
 function CopyButton({ read, label }: { read: () => string; label: string }) {
   const copy = useMarkdownCopy();
-  const resetTimerRef = useRef<number | undefined>(undefined);
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = useCallback(() => {
-    if (!navigator.clipboard) return;
-    navigator.clipboard
-      .writeText(read())
-      .then(() => {
-        setCopied(true);
-        window.clearTimeout(resetTimerRef.current);
-        resetTimerRef.current = window.setTimeout(() => setCopied(false), 1500);
-      })
-      .catch(() => {});
-  }, [read]);
+  const [copied, copyText, copyFailed, resetCopy, failedText] = useCopyText();
 
   return (
-    <button
-      type="button"
-      className="rk-chat-markdown-copy"
-      onClick={handleCopy}
-      aria-label={copied ? copy.copied : label}
-    >
-      {copied ? <CheckIcon /> : <CopyIcon />}
-    </button>
+    <>
+      <button
+        type="button"
+        className="rk-chat-markdown-copy"
+        onClick={() => copyText(read())}
+        aria-label={copied ? copy.copied : label}
+      >
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </button>
+      <CopyTextFallback
+        open={copyFailed}
+        onOpenChange={resetCopy}
+        text={failedText}
+        label={label}
+      />
+    </>
   );
 }
 
@@ -200,7 +197,7 @@ function MarkdownPre({
     const fence = start === undefined ? "" : streamingSource.slice(start, end);
     const opening = fence.match(/^(`{3,}|~{3,})/);
     const lastLine = fence.slice(fence.lastIndexOf("\n") + 1);
-    const closing = lastLine.match(/^(?:[ \t]*>[ \t]?)*[ \t]*(`{3,}|~{3,})[ \t]*$/);
+    const closing = lastLine.match(/^(?:[ \t]*>)*[ \t]*(`{3,}|~{3,})[ \t]*$/);
     if (
       !fence.includes("\n") ||
       !opening?.[1] ||
@@ -754,6 +751,43 @@ function urlTransform(url: string, key: string) {
     : (sanitizeMarkdownUrl(url, true) ?? "");
 }
 
+function renderMarkdown(source: string) {
+  return ReactMarkdown({
+    children: source,
+    components,
+    remarkPlugins,
+    rehypePlugins,
+    skipHtml: true,
+    urlTransform,
+  });
+}
+
+// Parsing is most of the cost of drawing a message, and opening a chat again draws every message
+// again. The output depends only on the source, so finished text is parsed once. The cache is
+// bounded by total text, and long documents are not kept.
+const renderedSources = new Map<string, ReactElement>();
+const RENDERED_TEXT_LIMIT = 2_000_000;
+const CACHED_SOURCE_LIMIT = 50_000;
+let renderedTextLength = 0;
+
+function renderFinishedMarkdown(source: string) {
+  if (source.length > CACHED_SOURCE_LIMIT) return renderMarkdown(source);
+  let rendered = renderedSources.get(source);
+  if (rendered) {
+    renderedSources.delete(source);
+  } else {
+    rendered = renderMarkdown(source);
+    renderedTextLength += source.length;
+  }
+  renderedSources.set(source, rendered);
+  for (const oldest of renderedSources.keys()) {
+    if (renderedTextLength <= RENDERED_TEXT_LIMIT) break;
+    renderedSources.delete(oldest);
+    renderedTextLength -= oldest.length;
+  }
+  return rendered;
+}
+
 const MarkdownBlock = memo(function MarkdownBlock({
   source,
   streaming,
@@ -765,21 +799,15 @@ const MarkdownBlock = memo(function MarkdownBlock({
   return (
     <StreamingSourceContext.Provider value={streaming ? source : undefined}>
       <MarkdownTableSourceContext.Provider value={parsed}>
-        <ReactMarkdown
-          components={components}
-          remarkPlugins={remarkPlugins}
-          rehypePlugins={rehypePlugins}
-          skipHtml
-          urlTransform={urlTransform}
-        >
-          {parsed}
-        </ReactMarkdown>
+        {streaming ? renderMarkdown(parsed) : renderFinishedMarkdown(parsed)}
       </MarkdownTableSourceContext.Provider>
     </StreamingSourceContext.Provider>
   );
 });
 
-type SourceBlock = { key: string; type: string; start: number; source: string };
+// A block is keyed by its kind and how many of that kind precede it, as react-markdown keys
+// elements, so a table keeps its sort, page and dialog when text before it changes.
+type SourceBlock = { start: number; source: string; type: string; key: string };
 type SplitSource = { text: string; blocks: SourceBlock[] };
 
 const blockParser = unified().use(remarkParse).use(remarkGfm);
@@ -791,43 +819,35 @@ const definition = /\]:/;
  * one before it (a list continued after a blank line), so only those two are parsed again.
  */
 function splitSource(text: string, previous: SplitSource | undefined): SplitSource {
-  const whole: SplitSource = {
-    text,
-    blocks: [{ key: "whole:0", type: "whole", start: 0, source: text }],
-  };
+  const whole = { text, blocks: [{ start: 0, source: text, type: "root", key: "root-0" }] };
   if (definition.test(text)) return whole;
   const kept = previous && text.startsWith(previous.text) ? previous.blocks.slice(0, -2) : [];
   const from = previous?.blocks[kept.length]?.start ?? 0;
   const tail = text.slice(from);
-  let parsed: ReturnType<typeof blockParser.parse>;
+  let parsed: { start: number; type: string }[];
   try {
-    parsed = blockParser.parse(tail);
+    parsed = blockParser.parse(tail).children.map((child, index) => ({
+      start: index === 0 ? 0 : tail.lastIndexOf("\n", (child.position?.start.offset ?? 1) - 1) + 1,
+      type: child.type,
+    }));
   } catch {
     return whole;
   }
-  if (parsed.children.length === 0) return whole;
+  if (parsed.length === 0) parsed = [{ start: 0, type: "root" }];
   const counts = new Map<string, number>();
-  for (const block of kept) {
-    counts.set(block.type, (counts.get(block.type) ?? 0) + 1);
-  }
-  const starts = parsed.children.map((child, index) =>
-    index === 0 ? 0 : tail.lastIndexOf("\n", (child.position?.start.offset ?? 1) - 1) + 1,
-  );
+  for (const block of kept) counts.set(block.type, (counts.get(block.type) ?? 0) + 1);
   return {
     text,
     blocks: [
       ...kept,
-      ...parsed.children.map((child, index) => {
-        const type = child.type;
-        const occurrence = counts.get(type) ?? 0;
-        counts.set(type, occurrence + 1);
-        const startOffset = starts[index] ?? 0;
-        const nextStartOffset = starts[index + 1] ?? tail.length;
+      ...parsed.map(({ start, type }, index) => {
+        const count = counts.get(type) ?? 0;
+        counts.set(type, count + 1);
         return {
-          key: `${type}:${occurrence}`,
+          start: from + start,
+          source: tail.slice(start, parsed[index + 1]?.start ?? tail.length),
           type,
-          start: from + startOffset,
-          source: tail.slice(startOffset, nextStartOffset),
+          key: `${type}-${count}`,
         };
       }),
     ],

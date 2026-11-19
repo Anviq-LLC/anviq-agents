@@ -26,18 +26,19 @@ export const DE_MESSAGES: Record<string, string> = {
   "Enter this code in Anviq Agents to confirm it's you:":
     "Gib diesen Code in Anviq Agents ein, um zu bestätigen, dass du es bist:",
   "Welcome to Anviq Agents": "Willkommen bei Anviq Agents",
-  "Thanks for signing up for Anviq Agents.":
-    "Danke, dass du dich bei Anviq Agents registriert hast.",
-  "Anviq Agents also has apps for": "Anviq Agents gibt es auch als App für",
-  "Questions or ideas?": "Fragen oder Ideen?",
-  "Join us on Discord": "Komm zu uns auf Discord",
-  "Anviq Agents is open source. If you like it,":
-    "Anviq Agents ist Open Source. Wenn es dir gefällt,",
-  "a star on GitHub": "hilft ein Stern auf GitHub",
-  "helps others find it.": "anderen, es zu finden.",
-  "Want to run it on your own servers?": "Möchtest du es auf deinen eigenen Servern betreiben?",
-  "Self-host Anviq Agents": "Anviq Agents selbst hosten",
-  "Have any questions? Reply to this email.": "Hast du Fragen? Antworte einfach auf diese E-Mail.",
+  "Welcome to Anviq Agents. The people who get the most out of it do three things:":
+    "Willkommen bei Anviq Agents. Wer das meiste aus Anviq Agents herausholt, macht drei Dinge:",
+  "Get the apps": "Hol dir die Apps",
+  "Anviq Agents runs on {platforms}, so your bots can reach you wherever you are.":
+    "Anviq Agents läuft auf {platforms}, damit deine Bots dich überall erreichen.",
+  "Join the community": "Werde Teil der Community",
+  "See what others are building, get help fast, and tell us what to build next on {discord}.":
+    "Sieh, was andere bauen, bekomm schnell Hilfe und sag uns auf {discord}, was wir als Nächstes bauen sollen.",
+  "Star us on GitHub": "Gib uns einen Stern auf GitHub",
+  "Anviq Agents is open source. {star} helps more people find it.":
+    "Anviq Agents ist Open Source. {star} hilft mehr Menschen, es zu finden.",
+  "A star on GitHub": "Ein Stern auf GitHub",
+  "Questions? Just reply. I read every one.": "Fragen? Antworte einfach. Ich lese jede Nachricht.",
   Unsubscribe: "Abmelden",
   "Invite a friend": "Lade einen Freund ein",
   "Invite a friend to Anviq Agents: they get {weeks} weeks free, and you earn a free month when they start a qualifying subscription with a new card.":
@@ -45,10 +46,6 @@ export const DE_MESSAGES: Record<string, string> = {
   "Open Anviq Agents": "Öffne Anviq Agents",
   "and choose Invite friends for your link.":
     "und wähle „Freunde einladen“, um deinen Link zu erhalten.",
-  "Have any questions? Just reply to this email.":
-    "Hast du Fragen? Antworte einfach auf diese E-Mail.",
-  "If you're enjoying Anviq Agents,": "Wenn dir Anviq Agents gefällt,",
-  "give us a star on GitHub": "gib uns einen Stern auf GitHub",
   "We received your Anviq Agents plugin": "Wir haben dein Anviq-Plugin erhalten",
   "Thanks for submitting a plugin to the Anviq Agents marketplace.":
     "Danke, dass du ein Plugin für den Anviq-Marktplatz eingereicht hast.",
@@ -73,4 +70,36 @@ export const DE_MESSAGES: Record<string, string> = {
     "Deine Änderungen an der Seite {name} wurden genehmigt.",
   "We couldn't approve your changes to the {name} page.":
     "Wir konnten deine Änderungen an der Seite {name} nicht genehmigen.",
+  "Your saved computer files will be deleted":
+    "Deine gespeicherten Computerdateien werden gelöscht",
+  "Your saved computer files will be deleted on {date} unless you resubscribe.":
+    "Deine gespeicherten Computerdateien werden am {date} gelöscht, wenn du dein Abo nicht erneuerst.",
+  "Your saved computer files will be deleted on {date} unless you choose a plan.":
+    "Deine gespeicherten Computerdateien werden am {date} gelöscht, wenn du keinen Tarif wählst.",
+  "{inviter} invited you to {organization} on Anviq Agents":
+    "{inviter} hat dich zu {organization} auf Anviq Agents eingeladen",
+  "{inviter} invited you to join {organization} on Anviq Agents.":
+    "{inviter} hat dich eingeladen, {organization} auf Anviq Agents beizutreten.",
+  "Join {organization}": "{organization} beitreten",
+  "This invitation expires in 7 days. Sign in with this email address to accept it.":
+    "Diese Einladung läuft in 7 Tagen ab. Melde dich mit dieser E-Mail-Adresse an, um sie anzunehmen.",
+  "{inviter} invited you to {space} on Anviq Agents":
+    "{inviter} hat dich zu {space} auf Anviq Agents eingeladen",
+  "{inviter} invited you to join {space} on Anviq Agents.":
+    "{inviter} hat dich eingeladen, {space} auf Anviq Agents beizutreten.",
+  "Join {space}": "{space} beitreten",
+  "This invitation expires in 7 days.": "Diese Einladung läuft in 7 Tagen ab.",
+  "Connect a model to start using Anviq Agents":
+    "Verbinde ein Modell, um mit Anviq Agents loszulegen",
+  "Your Anviq Agents plan has started, but your bots can't reply until a model is connected.":
+    "Dein Anviq-Tarif läuft, aber deine Bots können erst antworten, wenn ein Modell verbunden ist.",
+  "Sign in with your {subscriptions} subscription, or paste an API key.":
+    "Melde dich mit deinem Abo von {subscriptions} an oder füge einen API-Schlüssel ein.",
+  "Connect a model": "Modell verbinden",
+  "Bring your old assistant to Anviq Agents": "Bring deinen bisherigen Assistenten zu Anviq Agents",
+  "Already set up an assistant in {assistants}? Anviq Agents can bring over its instructions, memory, skills and routines as a new bot, so you don't start again.":
+    "Hast du schon einen Assistenten in {assistants} eingerichtet? Anviq Agents kann seine Anweisungen, sein Gedächtnis, seine Skills und Routinen als neuen Bot übernehmen, damit du nicht von vorn anfängst.",
+  "It works for any other assistant too: send it one prompt and paste its reply.":
+    "Das geht auch mit jedem anderen Assistenten: Schick ihm einen Prompt und füge seine Antwort ein.",
+  "Import an agent": "Agenten importieren",
 };

@@ -24,16 +24,20 @@ export const TR_MESSAGES: Record<string, string> = {
   "Enter this code in Anviq Agents to confirm it's you:":
     "Siz olduğunuzu onaylamak için bu kodu Anviq Agents’ya girin:",
   "Welcome to Anviq Agents": "Anviq Agents’ya hoş geldiniz",
-  "Thanks for signing up for Anviq Agents.": "Anviq Agents’ya kaydolduğunuz için teşekkürler.",
-  "Anviq Agents also has apps for": "Anviq Agents’nun şu platformlar için de uygulamaları var:",
-  "Questions or ideas?": "Sorularınız veya fikirleriniz mi var?",
-  "Join us on Discord": "Discord’da bize katılın",
-  "Anviq Agents is open source. If you like it,": "Anviq Agents açık kaynaklıdır. Beğendiyseniz",
-  "a star on GitHub": "GitHub’da vereceğiniz bir yıldız",
-  "helps others find it.": "başkalarının da onu bulmasına yardımcı olur.",
-  "Want to run it on your own servers?": "Kendi sunucularınızda çalıştırmak mı istiyorsunuz?",
-  "Self-host Anviq Agents": "Anviq Agents’yu kendiniz barındırın",
-  "Have any questions? Reply to this email.": "Sorunuz mu var? Bu e-postayı yanıtlayın.",
+  "Welcome to Anviq Agents. The people who get the most out of it do three things:":
+    "Anviq Agents'ya hoş geldiniz. Anviq Agents'dan en çok verimi alanlar üç şey yapıyor:",
+  "Get the apps": "Uygulamaları indirin",
+  "Anviq Agents runs on {platforms}, so your bots can reach you wherever you are.":
+    "Anviq Agents {platforms} üzerinde çalışır; böylece botlarınız size her yerde ulaşabilir.",
+  "Join the community": "Topluluğa katılın",
+  "See what others are building, get help fast, and tell us what to build next on {discord}.":
+    "Başkalarının neler yaptığını görün, hızlıca yardım alın ve sırada ne yapmamız gerektiğini {discord} üzerinden bize söyleyin.",
+  "Star us on GitHub": "GitHub'da bize yıldız verin",
+  "Anviq Agents is open source. {star} helps more people find it.":
+    "Anviq Agents açık kaynaklıdır. {star} daha fazla kişinin onu bulmasına yardımcı olur.",
+  "A star on GitHub": "GitHub'da bir yıldız",
+  "Questions? Just reply. I read every one.":
+    "Sorunuz mu var? Yanıtlamanız yeterli. Her birini okuyorum.",
   Unsubscribe: "Abonelikten çık",
   "Invite a friend": "Bir arkadaşını davet et",
   "Invite a friend to Anviq Agents: they get {weeks} weeks free, and you earn a free month when they start a qualifying subscription with a new card.":
@@ -41,10 +45,6 @@ export const TR_MESSAGES: Record<string, string> = {
   "Open Anviq Agents": "Anviq Agents’yu açın",
   "and choose Invite friends for your link.":
     "ve bağlantınızı almak için Arkadaşlarını davet et’i seçin.",
-  "Have any questions? Just reply to this email.":
-    "Sorunuz mu var? Bu e-postayı yanıtlamanız yeterli.",
-  "If you're enjoying Anviq Agents,": "Anviq Agents’yu beğeniyorsanız",
-  "give us a star on GitHub": "GitHub’da bize bir yıldız verin",
   "We received your Anviq Agents plugin": "Anviq Agents eklentinizi aldık",
   "Thanks for submitting a plugin to the Anviq Agents marketplace.":
     "Anviq Agents pazaryerine eklenti gönderdiğiniz için teşekkürler.",
@@ -69,4 +69,35 @@ export const TR_MESSAGES: Record<string, string> = {
     "{name} sayfasındaki değişiklikleriniz onaylandı.",
   "We couldn't approve your changes to the {name} page.":
     "{name} sayfasındaki değişikliklerinizi onaylayamadık.",
+  "Your saved computer files will be deleted": "Kayıtlı bilgisayar dosyaların silinecek",
+  "Your saved computer files will be deleted on {date} unless you resubscribe.":
+    "Yeniden abone olmazsan kayıtlı bilgisayar dosyaların {date} tarihinde silinecek.",
+  "Your saved computer files will be deleted on {date} unless you choose a plan.":
+    "Bir plan seçmezsen kayıtlı bilgisayar dosyaların {date} tarihinde silinecek.",
+  "{inviter} invited you to {organization} on Anviq Agents":
+    "{inviter} sizi Anviq Agents'da {organization} kuruluşuna davet etti",
+  "{inviter} invited you to join {organization} on Anviq Agents.":
+    "{inviter} sizi Anviq Agents'da {organization} kuruluşuna katılmaya davet etti.",
+  "Join {organization}": "{organization} kuruluşuna katıl",
+  "This invitation expires in 7 days. Sign in with this email address to accept it.":
+    "Bu davetin süresi 7 gün içinde dolar. Kabul etmek için bu e-posta adresiyle oturum açın.",
+  "{inviter} invited you to {space} on Anviq Agents":
+    "{inviter} sizi Anviq Agents'da {space} alanına davet etti",
+  "{inviter} invited you to join {space} on Anviq Agents.":
+    "{inviter} sizi Anviq Agents'da {space} alanına katılmaya davet etti.",
+  "Join {space}": "{space} alanına katıl",
+  "This invitation expires in 7 days.": "Bu davetin süresi 7 gün içinde dolar.",
+  "Connect a model to start using Anviq Agents":
+    "Anviq Agents’yu kullanmaya başlamak için bir model bağlayın",
+  "Your Anviq Agents plan has started, but your bots can't reply until a model is connected.":
+    "Anviq Agents planınız başladı, ancak bir model bağlanana kadar botlarınız yanıt veremez.",
+  "Sign in with your {subscriptions} subscription, or paste an API key.":
+    "{subscriptions} aboneliğinizle oturum açın veya bir API anahtarı yapıştırın.",
+  "Connect a model": "Model bağla",
+  "Bring your old assistant to Anviq Agents": "Eski asistanınızı Anviq Agents'ya taşıyın",
+  "Already set up an assistant in {assistants}? Anviq Agents can bring over its instructions, memory, skills and routines as a new bot, so you don't start again.":
+    "{assistants} üzerinde zaten bir asistan kurdunuz mu? Anviq Agents onun talimatlarını, belleğini, becerilerini ve rutinlerini yeni bir bot olarak getirebilir; böylece baştan başlamazsınız.",
+  "It works for any other assistant too: send it one prompt and paste its reply.":
+    "Başka herhangi bir asistanla da çalışır: ona tek bir istem gönderin ve yanıtını yapıştırın.",
+  "Import an agent": "Ajan içe aktar",
 };

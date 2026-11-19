@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PrismaClient } from "./client.js";
+import type { PrismaClient } from "./database/client.js";
 import { withLinkedBotHome, withoutLinkedBots } from "./linked-bots.js";
 
 describe("withoutLinkedBots", () => {

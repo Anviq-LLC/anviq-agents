@@ -1,4 +1,4 @@
-import type { Bot, BotSection, Group, Space } from "@anviq/contracts";
+import type { Bot, BotAvatarSet, BotSection, Group, Space } from "@anviq/contracts";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,15 +10,14 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Settings, Trash2 } from "lucide-react";
 import type { ComponentProps, RefObject } from "react";
 import { useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
-import { PAGE_PARAM } from "../../lib/pages";
-import { useSpaceQueries } from "../../lib/query";
-import type { Panel } from "../../lib/right-panel-state";
-import type { createSpaceRpc } from "../../lib/rpc";
-import { selectSpace } from "../../lib/rpc";
+import { PAGE_PARAM } from "../../lib/pages/pages";
+import { useSpaceQueries } from "../../lib/query/query";
+import type { createSpaceRpc, RpcClient } from "../../lib/query/rpc";
+import { selectSpace } from "../../lib/query/rpc";
+import type { CreateBotDialogInput } from "./bots/create-bot-dialog";
+import { CreateBotDialog } from "./bots/create-bot-dialog";
 import type { CommandPaletteAction } from "./command-palette";
 import { CommandPalette } from "./command-palette";
-import type { CreateBotDialogInput } from "./create-bot-dialog";
-import { CreateBotDialog } from "./create-bot-dialog";
 import {
   ClearConversationDialog,
   DeleteBotDialog,
@@ -27,7 +26,8 @@ import {
   NewBotSectionDialog,
   NewSpaceDialog,
   RenameBotSectionDialog,
-} from "./dialogs";
+} from "./create-delete-dialogs";
+import type { Panel } from "./right-panel-state";
 
 type ChatTarget = { kind: "bot"; chat: Bot } | { kind: "group"; chat: Group };
 type SectionTarget = { section: BotSection; spaceId: string };
@@ -101,7 +101,9 @@ export function ShellDialogs({
   openSpaceSettings,
   closeMobileSidebar,
   createBot,
+  botAvatarSet,
   clearOpenThread,
+  discardChatAttachments,
   deleteRoutineDialogProps,
   paletteActions,
 }: {
@@ -118,8 +120,12 @@ export function ShellDialogs({
   removeSpace: (spaceId: string) => Promise<void>;
   openSpaceSettings: (spaceId: string) => void;
   closeMobileSidebar: () => void;
-  createBot: (input: CreateBotDialogInput) => Promise<void>;
+  createBot: (input: CreateBotDialogInput, client: RpcClient) => Promise<void>;
+  /** The account's set, which a new bot takes. */
+  botAvatarSet: BotAvatarSet;
   clearOpenThread: () => void;
+  /** Drops a deleted chat's pending attachments with their previews. */
+  discardChatAttachments: (threadKey: string) => void;
   deleteRoutineDialogProps: ComponentProps<typeof DeleteItemDialog> | null;
   paletteActions: CommandPaletteAction[];
 }) {
@@ -220,6 +226,7 @@ export function ShellDialogs({
           onCancel={() => setDeleteTarget(null)}
           onConfirm={async (deleteMemories) => {
             await rpc.bots.remove({ botId: deleteTarget.id, deleteMemories });
+            discardChatAttachments(deleteTarget.id);
             setDeleteTarget(null);
             setPanel(null);
             await refreshBots(true);
@@ -234,6 +241,7 @@ export function ShellDialogs({
           onCancel={() => setDeleteGroupTarget(null)}
           onConfirm={async () => {
             await rpc.groups.remove({ groupId: deleteGroupTarget.id });
+            discardChatAttachments(deleteGroupTarget.id);
             setDeleteGroupTarget(null);
             setPanel(null);
             await refreshBots(true);
@@ -256,8 +264,8 @@ export function ShellDialogs({
         <NewBotSectionDialog
           bot={newSectionTarget.chat}
           onCancel={() => setNewSectionTarget(null)}
-          onConfirm={async (name) => {
-            await rpc.botSections.create(
+          onConfirm={async (name, client) => {
+            await client.botSections.create(
               newSectionTarget.kind === "bot"
                 ? { botId: newSectionTarget.chat.id, name }
                 : { groupId: newSectionTarget.chat.id, name },
@@ -272,8 +280,8 @@ export function ShellDialogs({
         <RenameBotSectionDialog
           section={renameSectionTarget.section}
           onCancel={() => setRenameSectionTarget(null)}
-          onConfirm={async (name) => {
-            await rpc.botSections.update(
+          onConfirm={async (name, client) => {
+            await client.botSections.update(
               {
                 sectionId: renameSectionTarget.section.id,
                 name,
@@ -328,16 +336,20 @@ export function ShellDialogs({
       />
 
       {createBotOpen ? (
-        <CreateBotDialog onCancel={() => setCreateBotOpen(false)} onCreate={createBot} />
+        <CreateBotDialog
+          avatarSet={botAvatarSet}
+          onCancel={() => setCreateBotOpen(false)}
+          onCreate={createBot}
+        />
       ) : null}
 
       {newSpaceOpen ? (
         <NewSpaceDialog
           onCancel={() => setNewSpaceOpen(false)}
-          onCreate={async (name) => (await rpc.spaces.create({ name })).id}
+          onCreate={async (name, client) => (await client.spaces.create({ name })).id}
           loadItems={() => rpc.availability.items()}
-          chooseItems={async (spaceId, items) => {
-            await rpc.availability.chooseForSpace({
+          chooseItems={async (spaceId, items, client) => {
+            await client.availability.chooseForSpace({
               spaceId,
               items: items.map(({ kind, id }) => ({ kind, id })),
             });

@@ -12,6 +12,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import socket
 import struct
 import time
@@ -20,6 +21,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 WORLD_NAME = "anviq-page-browser"
+# The largest CDP message read whole; a larger one (a page event) is skipped.
+MAX_FRAME_BYTES = 2 * 1024 * 1024
 
 # A frame asked for, began or committed a load of another document. Same-document changes, such as
 # a new URL fragment, leave the page and its fields in place and are not counted.
@@ -101,6 +104,11 @@ class CdpClient:
         # Navigations to another document started or committed in each frame, per CDP session.
         self._navigations: dict[tuple[Any, str], int] = {}
         self._frame_sessions: dict[str, Any] = {}
+        # Navigations too large to read, which could have been in any frame.
+        self._skipped_navigations = 0
+        # What is left of an oversized frame being skipped, and the request it answers, if any.
+        self._discard = 0
+        self._discarded_reply: int | None = None
 
     def connect(self) -> None:
         parts = urlsplit(self._ws_url)
@@ -158,8 +166,26 @@ class CdpClient:
                 raise RuntimeError("CDP websocket closed")
             self._buf.extend(chunk)
 
+    def _drain(self) -> None:
+        """Drop the rest of an oversized frame, a chunk at a time, so that it is never held in memory."""
+        assert self._sock is not None
+        while self._discard:
+            if not self._buf:
+                chunk = self._sock.recv(65536)
+                if not chunk:
+                    raise RuntimeError("CDP websocket closed")
+                self._buf.extend(chunk)
+            taken = min(self._discard, len(self._buf))
+            del self._buf[:taken]
+            self._discard -= taken
+
     def _read_frame(self) -> bytes:
         while True:
+            self._drain()
+            if self._discarded_reply is not None:
+                # Our own replies are small: an oversized one is failed alone, not mistaken for an event.
+                msg_id, self._discarded_reply = self._discarded_reply, None
+                return json.dumps({"id": msg_id, "error": {"message": "CDP reply too large"}}).encode("utf-8")
             self._need(2)
             b1, b2 = self._buf[0], self._buf[1]
             opcode, masked, length, offset = b1 & 0x0F, bool(b2 & 0x80), b2 & 0x7F, 2
@@ -169,9 +195,6 @@ class CdpClient:
             elif length == 127:
                 self._need(10)
                 length, offset = struct.unpack("!Q", self._buf[2:10])[0], 10
-            # Bounded before the payload is read: these steps never ask for anything large.
-            if length > 2 * 1024 * 1024:
-                raise RuntimeError("CDP frame too large")
             if not (b1 & 0x80):
                 raise RuntimeError("Fragmented CDP message unsupported")
             mask = b""
@@ -179,6 +202,21 @@ class CdpClient:
                 self._need(offset + 4)
                 mask = bytes(self._buf[offset:offset + 4])
                 offset += 4
+            if length > MAX_FRAME_BYTES:
+                # A page's own events can be huge (a request for a multi-megabyte data: URL): skip them.
+                head_size = min(length, 256)
+                self._need(offset + head_size)
+                head = bytes(self._buf[offset:offset + head_size])
+                if masked:
+                    head = bytes(b ^ mask[i % 4] for i, b in enumerate(head))
+                reply = re.match(rb'\{"id":\s*(\d+)\s*[,}]', head)
+                if reply and opcode in (0x0, 0x1, 0x2):
+                    self._discarded_reply = int(reply.group(1))
+                elif opcode in (0x0, 0x1, 0x2):
+                    self._skipped_event(head)
+                del self._buf[:offset]
+                self._discard = length
+                continue
             self._need(offset + length)
             payload = bytes(self._buf[offset:offset + length])
             del self._buf[:offset + length]
@@ -191,6 +229,12 @@ class CdpClient:
                 continue
             if opcode in (0x0, 0x1, 0x2):
                 return payload
+
+    def _skipped_event(self, head: bytes) -> None:
+        """The first bytes of an event too large to read."""
+        method = re.match(rb'\{"method":"([^"]+)"', head)
+        if method and method.group(1).decode() in NAVIGATION_EVENTS:
+            self._skipped_navigations += 1
 
     def _handle_event(self, message: dict[str, Any]) -> None:
         method = message.get("method")
@@ -222,7 +266,7 @@ class CdpClient:
         return [child for child, parent in self._frame_sessions.items() if parent == parent_session_id]
 
     def navigations(self, session_id: str, frame_id: str) -> int:
-        return self._navigations.get((session_id, frame_id), 0)
+        return self._navigations.get((session_id, frame_id), 0) + self._skipped_navigations
 
     def find_world_context(self, world_name: str, frame_id: str, session_id: str) -> int | None:
         for context_id, context in self._contexts.items():
@@ -342,6 +386,40 @@ EVAL_HELPERS = r"""
       && !el.disabled && !el.readOnly && el.getAttribute("aria-hidden") !== "true" && visible(el)
       && (el.getAttribute("autocomplete") || "").toLowerCase().split(/\s+/).includes(token));
   }
+  // The option a visible saved field picks, matched as browser_act fill matches one. Only options that
+  // can be chosen are matched or listed, so a refusal never repeats the saved value.
+  function chooseOption(select, value) {
+    const label = (option) => (option.label || option.text).replace(/\s+/g, " ").trim();
+    const norm = (text) => text.replace(/\s+/g, " ").trim().toLowerCase();
+    const options = [...select.options].filter((option) => !option.disabled
+      && !(option.parentElement instanceof HTMLOptGroupElement && option.parentElement.disabled));
+    const match = options.find((option) => option.value === value)
+      ?? options.find((option) => label(option) === value)
+      ?? options.find((option) => norm(label(option)) === norm(value) || norm(option.value) === norm(value));
+    if (!match) {
+      // Long labels keep their start and end, and the list stops at about 2 KB.
+      const shown = [];
+      let size = 0;
+      for (const option of options) {
+        const text = label(option);
+        const part = JSON.stringify(text.length > 80 ? `${text.slice(0, 50)}…${text.slice(-29)}` : text);
+        if (size + part.length > 2000) {
+          shown.push(`and ${options.length - shown.length} more`);
+          break;
+        }
+        shown.push(part);
+        size += part.length + 2;
+      }
+      throw refused(`This dropdown has no option for this saved field. Its options: ${shown.join(", ") || "none"}.`);
+    }
+    for (const option of select.options) option.selected = false;
+    match.selected = true;
+    // Snapshots never show which option was chosen, whatever the page later does with the dropdown.
+    select.setAttribute(FILLED, "");
+    select.dispatchEvent(new Event("input", { bubbles: true }));
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  }
   // The element keys go to in this document, through open shadow trees.
   function focused() {
     let el = document.activeElement;
@@ -379,9 +457,9 @@ EVAL_HELPERS = r"""
       const el = focused();
       if (!el) throw refused("The field did not keep focus, so nothing was typed. Take a fresh snapshot and fill again.");
       if (el.readOnly || el.disabled) throw refused("Element is read-only");
-      // A password goes only into a password field, which never displays it. A username is an input;
-      // textareas, search boxes, and editable page content stay out. A card goes only into a plain
-      // input: text, tel, or password (CVC boxes are often masked).
+      // A password goes only into a password field, which never displays it. A username is an input or
+      // a dropdown's option; textareas, search boxes, and editable page content stay out. A card goes
+      // only into a plain input: text, tel, or password (CVC boxes are often masked).
       const input = el instanceof HTMLInputElement ? el : null;
       if (card && !(input && ["text", "tel", "password"].includes(input.type))) {
         throw refused("A card can only be typed into a card field.");
@@ -390,9 +468,10 @@ EVAL_HELPERS = r"""
       if (password && !(input && input.type === "password")) {
         throw refused("A saved password can only be typed into a password field.");
       }
+      if (field === "username" && el instanceof HTMLSelectElement) return chooseOption(el, String(value));
       if (!card && !password && !(input && ["text", "email", "tel"].includes(input.type))) {
         throw refused(code ? "A code can only be typed into a text, email, or telephone field."
-          : "A saved username can only be typed into a text, email, or telephone field.");
+          : "A saved username can only be typed into a text, email, or telephone field, or chosen in a dropdown.");
       }
       if (code && !looksLikeCodeBox(input)) {
         throw refused("This field doesn't look like a code box; ask the user to take over.");
@@ -421,6 +500,20 @@ EVAL_HELPERS = r"""
         setTimeout(() => { if (cardMasked.has(input)) maskCodeSlots(input, value); }, 50);
       }
       return true;
+    },
+    // The options saved logins chose in this document's dropdowns, open shadow trees included.
+    filledChoices() {
+      const found = [];
+      const visit = (root) => {
+        for (const select of root.querySelectorAll(`select[${FILLED}]`)) {
+          for (const option of select.selectedOptions) {
+            found.push(option.value, (option.label || option.text).replace(/\s+/g, " ").trim());
+          }
+        }
+        for (const el of root.querySelectorAll("*")) if (el.shadowRoot) visit(el.shadowRoot);
+      };
+      visit(document);
+      return found;
     },
     payTokenAccount() {
       const blocks = [...document.querySelectorAll(".AiAgentPaymentSteering")]
@@ -593,10 +686,10 @@ def pay_token_frames(client: CdpClient, frames: list[tuple[str, str, int]]) -> l
             if origin == PAY_TOKEN_FRAME_ORIGIN]
 
 
-def focused_frame(client: CdpClient, session_id: str) -> tuple[str, str, int]:
-    """The frame whose document holds focus, followed through the frame elements that hold it:
-    (session, frame, world). Frames in another process are found through their own sessions."""
-    children: dict[str, list[tuple[str, str]]] = {}
+def all_frames(client: CdpClient, session_id: str, complete: bool = False) -> list[tuple[str, str, str | None]]:
+    """The tab's frames, up to MAX_FRAME_SESSIONS processes: (session, frame, parent frame). Frames in
+    another process are found through their own sessions. With complete, raises unless every frame is in."""
+    frames: list[tuple[str, str, str | None]] = []
     sessions, seen = [session_id], set()
     while sessions and len(seen) < MAX_FRAME_SESSIONS:
         session = sessions.pop(0)
@@ -607,15 +700,30 @@ def focused_frame(client: CdpClient, session_id: str) -> tuple[str, str, int]:
             if session != session_id:
                 client.call("Page.enable", session_id=session)
             sessions += auto_attach(client, session)
+            if complete and len(client.frame_sessions(session)) > MAX_FRAME_SESSIONS:
+                raise RuntimeError("too many frames")
             stack = [client.call("Page.getFrameTree", session_id=session)["frameTree"]]
         except Exception:  # noqa: BLE001
+            if complete:
+                raise
             continue
         while stack:
             node = stack.pop()
             frame = node["frame"]
-            if frame.get("parentId"):
-                children.setdefault(frame["parentId"], []).append((session, frame["id"]))
+            frames.append((session, frame["id"], frame.get("parentId")))
             stack += node.get("childFrames") or []
+    if complete and set(sessions) - seen:
+        raise RuntimeError("too many frames")
+    return frames
+
+
+def focused_frame(client: CdpClient, session_id: str) -> tuple[str, str, int]:
+    """The frame whose document holds focus, followed through the frame elements that hold it:
+    (session, frame, world)."""
+    children: dict[str, list[tuple[str, str]]] = {}
+    for session, frame_id, parent in all_frames(client, session_id):
+        if parent:
+            children.setdefault(parent, []).append((session, frame_id))
     at = (session_id, main_frame(client, session_id)["id"], client.context_id)
     for _ in range(MAX_FRAME_DEPTH):
         session, frame_id, world = at
@@ -850,6 +958,22 @@ def frame_hints(client: CdpClient, session_id: str) -> tuple[bool, str | None]:
     accounts = [found for found in frame_eval(client, pay_token_frames(client, frames),
                                               "window.__anviqPageBrowser.payTokenAccount()") if found]
     return card, accounts[0] if len(accounts) == 1 else None
+
+
+def filled_choices(port: int, target_id: str) -> set[str]:
+    """The values and labels of the options saved logins chose in dropdowns, in every frame of the
+    tab: a snapshot never marks them as chosen. Raises when a frame cannot be read."""
+    client = connect(port)
+    try:
+        session_id = attach(client, target_id)
+        found: set[str] = set()
+        for session, frame_id, _ in all_frames(client, session_id, complete=True):
+            world = world_in(client, session, frame_id)
+            found.update(str(text) for text in eval_json(client, session, "window.__anviqPageBrowser.filledChoices()",
+                                                         context_id=world) or [] if text)
+        return found
+    finally:
+        client.close()
 
 
 def payment_frame_hints(port: int, target_id: str) -> tuple[bool, str | None]:

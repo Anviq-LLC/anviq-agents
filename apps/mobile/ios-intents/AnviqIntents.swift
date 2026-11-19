@@ -114,7 +114,7 @@ struct StartVoiceChatIntent: AppIntent {
 
   @MainActor
   func perform() async throws -> some IntentResult {
-    guard let target = target(bot) else { throw MessageBotError.noBot }
+    guard let target = try await target(bot) else { throw MessageBotError.noBot }
     let botId = target.botId
     UserDefaults.standard.set(
       ["botId": botId, "at": String(Date().timeIntervalSince1970)],
@@ -125,12 +125,34 @@ struct StartVoiceChatIntent: AppIntent {
   }
 }
 
-/// The chosen bot, or the one whose chat was opened last, with the Space it was opened in.
-private func target(_ bot: BotEntity?) -> (botId: String, spaceId: String?)? {
+/// The single record written by lib/inbox/last-bot.ts; legacy ids have no verified owner.
+private struct SavedLastBot: Decodable {
+  let botId: String
+  let spaceId: String?
+  let apiBase: String
+  let userId: String
+}
+
+/// The chosen bot, or a saved bot owned by this authenticated account and server. Throws the
+/// verification failure (signed out, server unreachable), so a shortcut reports what went
+/// wrong; returns nil only when no bot was saved or the saved one is not this account's, which
+/// ask for a chat first.
+private func target(
+  _ bot: BotEntity?, with snapshot: AnviqSession? = nil
+) async throws -> (botId: String, spaceId: String?)? {
   if let bot { return (bot.botId, bot.spaceId) }
-  guard let last = secureStoreItem("anviq.last_bot_id"), !last.isEmpty else { return nil }
-  let space = secureStoreItem("anviq.last_bot_space_id")
-  return (last, space?.isEmpty == false ? space : nil)
+  let session = try snapshot ?? AnviqSession.load()
+  guard
+    let data = secureStoreItem("anviq.last_bot_id")?.data(using: .utf8),
+    let last = try? JSONDecoder().decode(SavedLastBot.self, from: data),
+    !last.botId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+    !last.userId.isEmpty, last.apiBase == session.apiBase
+  else { return nil }
+  let userId = try await session.currentUserId()
+  guard userId == last.userId else { return nil }
+  let current = try AnviqSession.load()
+  guard current.token == session.token, current.apiBase == session.apiBase else { return nil }
+  return (last.botId, last.spaceId)
 }
 
 @MainActor
@@ -151,8 +173,9 @@ private struct Delivery {
 /// Sends with the app's own session and the same procedures as the composer, so the bot runs it
 /// as a message the user sent. Without a chosen bot it goes to the one whose chat was opened last.
 private func send(_ message: String, file: IntentFile?, to bot: BotEntity?) async throws -> Delivery {
-  guard let target = target(bot) else { throw MessageBotError.noBot }
-  return try await send(message, file: file, to: target, with: AnviqSession.load(), timeout: 60)
+  let session = try AnviqSession.load()
+  guard let target = try await target(bot, with: session) else { throw MessageBotError.noBot }
+  return try await send(message, file: file, to: target, with: session, timeout: 60)
 }
 
 private func send(
@@ -188,9 +211,9 @@ private func send(
 /// A voice message goes to the bot whose chat was opened last; its reply arrives as a notification.
 /// The bot and session are read now, while unlocked. Its island waits on the send, so a lost
 /// connection gives up sooner than a typed message would.
-func lastBotSender() throws -> (String) async throws -> Void {
-  guard let target = target(nil) else { throw MessageBotError.noBot }
+func lastBotSender() async throws -> (String) async throws -> Void {
   let session = try AnviqSession.load()
+  guard let target = try await target(nil, with: session) else { throw MessageBotError.noBot }
   return { message in
     _ = try await send(message, file: nil, to: target, with: session, timeout: 15)
   }
@@ -349,7 +372,7 @@ private final class RejectRedirects: NSObject, URLSessionTaskDelegate {
   }
 }
 
-private struct AnviqSession {
+struct AnviqSession {
   private static let transport = URLSession(
     configuration: .ephemeral, delegate: RejectRedirects(), delegateQueue: nil)
 
@@ -358,7 +381,7 @@ private struct AnviqSession {
   let selectedSpaceId: String?
   let headers: [String: String]
 
-  // The keys lib/session.ts, lib/server-config.ts and lib/api.ts keep in expo-secure-store.
+  // The keys lib/api/session.ts, lib/api/server-config.ts and lib/api/api.ts keep in expo-secure-store.
   static func load() throws -> AnviqSession {
     guard let token = secureStoreItem("anviq.session_token"), !token.isEmpty else {
       throw MessageBotError.signedOut
@@ -375,13 +398,31 @@ private struct AnviqSession {
       headers: serverHeaders(for: apiBase))
   }
 
-  /// The headers lib/server-headers.ts saved for this server, such as an access proxy's.
+  /// The headers lib/api/server-headers.ts saved for this server, such as an access proxy's.
   private static func serverHeaders(for apiBase: String) -> [String: String] {
     guard let stored = secureStoreItem("anviq.server_headers")?.data(using: .utf8),
       let saved = try? JSONDecoder().decode(SavedHeaders.self, from: stored),
       saved.apiBase == apiBase
     else { return [:] }
     return saved.headers
+  }
+
+  /// Verify the account using this exact server and bearer before using a saved shortcut.
+  func currentUserId() async throws -> String {
+    guard let url = URL(string: "\(apiBase)/api/auth/get-session") else {
+      throw MessageBotError.signedOut
+    }
+    var request = URLRequest(url: url, timeoutInterval: 5)
+    for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+    request.setValue("anviq://", forHTTPHeaderField: "origin")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "authorization")
+    let (data, response) = try await Self.transport.data(for: request)
+    try checkResponse(response)
+    // An expired bearer can answer 200 with no user; that is a sign-in prompt, not a retry.
+    guard let userId = try? JSONDecoder().decode(SessionIdentity.self, from: data).user.id,
+      !userId.isEmpty
+    else { throw MessageBotError.signedOut }
+    return userId
   }
 
   /// The app asks before AI first sees the user's data; an action from here cannot ask.
@@ -474,7 +515,7 @@ private struct AnviqSession {
     guard (200..<300).contains(status) else { throw MessageBotError.server(nil) }
   }
 
-  /// Calls an oRPC procedure the way lib/api.ts does.
+  /// Calls an oRPC procedure the way lib/api/api.ts does.
   func rpc<Output: Decodable>(
     _ procedure: String, _ input: [String: Any], spaceId: String?, timeout: TimeInterval = 60
   ) async throws -> Output {
@@ -484,6 +525,9 @@ private struct AnviqSession {
     if status == 401 { throw MessageBotError.signedOut }
     guard (200..<300).contains(status) else {
       let error = try? JSONDecoder().decode(Envelope<ServerError>.self, from: data)
+      if (400..<500).contains(status), status != 408 {
+        throw MessageBotError.rejected(status: status, message: error?.json.message)
+      }
       throw MessageBotError.server(error?.json.message)
     }
     return try JSONDecoder().decode(Envelope<Output>.self, from: data).json
@@ -511,12 +555,13 @@ private func secureStoreItem(_ key: String) -> String? {
   return nil
 }
 
-private enum MessageBotError: Error, CustomLocalizedStringResourceConvertible {
+enum MessageBotError: Error, CustomLocalizedStringResourceConvertible {
   case signedOut
   case noBot
   case needsYou
   case consentRequired
   case server(String?)
+  case rejected(status: Int, message: String?)
 
   var localizedStringResource: LocalizedStringResource {
     switch self {
@@ -524,10 +569,15 @@ private enum MessageBotError: Error, CustomLocalizedStringResourceConvertible {
     case .noBot: "Open a chat in Anviq Agents first."
     case .needsYou: "It needs you in Anviq Agents."
     case .consentRequired: "Review AI data sharing in Account settings before continuing."
-    case .server(let message?): "\(message)"
-    case .server(nil): "Something went wrong. Try again."
+    case .server(let message?), .rejected(_, let message?): "\(message)"
+    case .server(nil), .rejected(_, nil): "Something went wrong. Try again."
     }
   }
+}
+
+private struct SessionIdentity: Decodable {
+  struct User: Decodable { let id: String }
+  let user: User
 }
 
 private struct SavedHeaders: Decodable {
