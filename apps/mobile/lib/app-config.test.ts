@@ -50,7 +50,10 @@ describe("mobile app config", () => {
     };
 
     expect(appConfig(context(existing))).toBe(existing);
-    expect(appConfig(context(config))).toBe(config);
+    const resolved = appConfig(context(config));
+    expect(resolved.ios).toEqual(config.ios);
+    expect(resolved.extra).toEqual(config.extra);
+    expect(resolved.android).toEqual(config.android);
   });
 
   it("adds Android config when none exists", () => {
@@ -78,16 +81,33 @@ describe("mobile app config", () => {
     });
   });
 
-  it.each(["https://localhost:3100", "https://192.168.1.20", "https://[::1]", "not a url"])(
-    "skips passkey domains for %s",
-    (url) => {
-      vi.stubEnv("EAS_BUILD_PROFILE", "development");
-      vi.stubEnv("EXPO_PUBLIC_API_URL", url);
-      vi.stubEnv("GOOGLE_SERVICES_JSON", undefined);
+  it("asks a development build to fetch the association itself in developer mode", () => {
+    vi.stubEnv("EAS_BUILD_PROFILE", "development");
+    vi.stubEnv("ANVIQ_PASSKEY_DEVELOPER_MODE", "1");
 
-      expect(appConfig(context(config))).toBe(config);
-    },
-  );
+    expect(appConfig(context(config))).toEqual({
+      ...config,
+      ios: { ...config.ios, associatedDomains: ["webcredentials:app.example.com?mode=developer"] },
+      extra: { ...config.extra, passkeyRpIds: ["app.example.com"] },
+    });
+  });
+
+  it.each([
+    "http://app.example.com",
+    "https://localhost:3100",
+    "https://192.168.1.20",
+    "https://[::1]",
+    "not a url",
+  ])("skips passkey domains for %s", (url) => {
+    vi.stubEnv("EAS_BUILD_PROFILE", "development");
+    vi.stubEnv("EXPO_PUBLIC_API_URL", url);
+    vi.stubEnv("GOOGLE_SERVICES_JSON", undefined);
+
+    const resolved = appConfig(context(config));
+    expect(resolved.ios).toEqual(config.ios);
+    expect(resolved.extra).toEqual(config.extra);
+    expect(resolved.android).toEqual(config.android);
+  });
 
   it("allows cleartext traffic for an http server without passkey domains", () => {
     vi.stubEnv("EAS_BUILD_PROFILE", "development");

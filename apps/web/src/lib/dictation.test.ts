@@ -918,6 +918,14 @@ describe("dictation engine choice", () => {
     expect(webSpeechAvailable()).toBe(true);
   });
 
+  it("listens through the desktop app's system recognizer when it offers one", () => {
+    vi.stubGlobal("window", {
+      webkitSpeechRecognition: class {},
+      anviqDesktop: { platform: "darwin", speech: {} },
+    });
+    expect(webSpeechAvailable()).toBe(true);
+  });
+
   it("treats Electron as having no usable Web Speech", () => {
     vi.stubGlobal("window", {
       webkitSpeechRecognition: class {},
@@ -930,6 +938,58 @@ describe("dictation engine choice", () => {
     vi.stubGlobal("window", { webkitSpeechRecognition: class {} });
     vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 Electron/44.2.0" });
     expect(webSpeechAvailable()).toBe(false);
+  });
+
+  it.each(["hold", "endpoint"] as const)(
+    "prefers a configured provider over desktop speech for %s",
+    async (mode) => {
+      stubRecorderFallback(vi.fn());
+      vi.stubGlobal(
+        "AudioContext",
+        class {
+          state = "running";
+          createMediaStreamSource() {
+            return { connect() {} };
+          }
+          createAnalyser() {
+            return {
+              fftSize: 2048,
+              getByteTimeDomainData(data: Uint8Array) {
+                data.fill(128);
+              },
+            };
+          }
+          close() {
+            return Promise.resolve();
+          }
+        },
+      );
+      const start = vi.fn();
+      vi.stubGlobal("window", { anviqDesktop: { platform: "darwin", speech: { start } } });
+      const dictation = new Dictation();
+      await dictation.listen({ mode, transcribe: true, onFinal: vi.fn() });
+      expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledOnce();
+      expect(start).not.toHaveBeenCalled();
+      expect(dictation.state.status).toBe("listening");
+      dictation.stop();
+    },
+  );
+
+  it.each(["browser", "desktop"])("keeps %s behavior without the speech bridge", async (host) => {
+    stubRecorderFallback(vi.fn());
+    const start = vi.fn();
+    vi.stubGlobal("window", {
+      SpeechRecognition: class {
+        start = start;
+        abort() {}
+      },
+      ...(host === "desktop" ? { anviqDesktop: { platform: "darwin" } } : {}),
+    });
+    const dictation = new Dictation();
+    await dictation.listen({ mode: "hold", transcribe: true, onFinal: vi.fn() });
+    expect(start).toHaveBeenCalledTimes(host === "browser" ? 1 : 0);
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(host === "desktop" ? 1 : 0);
+    dictation.stop();
   });
 
   it("falls back only for service failures when transcription is connected", () => {
@@ -998,13 +1058,49 @@ describe("Dictation web speech", () => {
     expect(instances[0]?.lang).toBe("nl-NL");
   });
 
-  it("maps a regional browser language onto the app's own tag", async () => {
-    vi.stubGlobal("navigator", { language: "nl-BE" });
+  it("hears the browser's regional variant of the app's language", async () => {
+    vi.stubGlobal("navigator", { language: "es-CL" });
 
     const dictation = new Dictation();
     await dictation.listen({ mode: "hold", onFinal: () => undefined });
 
-    expect(instances[0]?.lang).toBe("nl-NL");
+    expect(instances[0]?.lang).toBe("es-CL");
+  });
+
+  it("keeps the app's language when the browser speaks another one", async () => {
+    vi.stubGlobal("navigator", { language: "de-DE" });
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => (key === "anviq.uiLocale" ? "es" : null),
+      setItem: () => undefined,
+      removeItem: () => undefined,
+      clear: () => undefined,
+    });
+
+    const dictation = new Dictation();
+    await dictation.listen({ mode: "hold", onFinal: () => undefined });
+
+    expect(instances[0]?.lang).toBe("es-ES");
+  });
+
+  it.each([
+    ["es-CL", "es-CL"],
+    ["es-ES", "es-ES"],
+    ["es-419", "es-MX"],
+    ["es_AR", "es-AR"],
+    ["it-IT", "it-IT"],
+  ])("follows browser %s as %s when the UI is English", async (browser, expected) => {
+    vi.stubGlobal("navigator", { language: browser });
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => (key === "anviq.uiLocale" ? "en" : null),
+      setItem: () => undefined,
+      removeItem: () => undefined,
+      clear: () => undefined,
+    });
+
+    const dictation = new Dictation();
+    await dictation.listen({ mode: "hold", onFinal: () => undefined });
+
+    expect(instances[0]?.lang).toBe(expected);
   });
 
   it("keeps the browser language when the app has no catalog for it", async () => {

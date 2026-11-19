@@ -1,13 +1,19 @@
 import type { AgentSkill, AgentSkillCatalogEntry, MemoryDocument } from "@anviq/contracts";
 import { isDeletableMemoryDocument, isEmptyBotMemory } from "@anviq/contracts";
 import { fetchFresh, writeSaved } from "@anviq/core/query";
-import { Badge, Button, Skeleton, Textarea } from "@anviq/ui-web";
+import { Badge, Button, SectionHeading, Skeleton, Textarea } from "@anviq/ui-web";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@anviq/ui-web/components/ui/tooltip";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { ORPCError } from "@orpc/client";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import {
+  AvailabilityControl,
+  AvailabilityLabel,
+  reachesOtherSpaces,
+  useOwnSpaces,
+} from "../components/integrations/space-availability";
 import { SettingsSectionHeading } from "../components/SettingsSectionHeading";
 import { downloadArtifactBytes } from "../lib/artifact-open";
 import { useSpaceQueries } from "../lib/query";
@@ -75,6 +81,19 @@ function MemoryDocumentList({
   const listQuery = useQuery({ ...list, refetchOnMount: "always" });
   const docs = listQuery.data ?? NO_DOCS;
   const loading = listQuery.isPending;
+  const budgetInput = input.scope === "bot" && input.botId ? { botId: input.botId } : null;
+  const budgetOptions = budgetInput
+    ? queries.memory.budget.queryOptions({ input: budgetInput })
+    : null;
+  const budgetQuery = useQuery(
+    budgetOptions ?? { queryKey: ["memory-budget", "none"], queryFn: skipToken },
+  );
+  const budget = budgetInput && budgetQuery.data ? budgetQuery.data : null;
+  const bytesLeftOut = budget
+    ? budget.omitted.reduce((sum, entry) => sum + entry.totalBytes, 0) +
+      budget.documents.reduce((sum, entry) => sum + entry.totalBytes - entry.includedBytes, 0)
+    : 0;
+  const kb = Math.ceil(bytesLeftOut / 1024);
   const [showAll, setShowAll] = useState(false);
   // Once shown, memory stays visible while the panel is open, even if emptied.
   const [memoryShown, setMemoryShown] = useState(false);
@@ -89,8 +108,9 @@ function MemoryDocumentList({
   const error = actionError ?? (listQuery.isError ? t`Could not load` : null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
-  function setDocs(update: (current: MemoryDocument[]) => MemoryDocument[]) {
-    return writeSaved(queryClient, list.queryKey, (current) => update(current ?? []));
+  async function setDocs(update: (current: MemoryDocument[]) => MemoryDocument[]) {
+    await writeSaved(queryClient, list.queryKey, (current) => update(current ?? []));
+    if (budgetOptions) void queryClient.invalidateQueries({ queryKey: budgetOptions.queryKey });
   }
 
   function openDoc(doc: MemoryDocument) {
@@ -180,12 +200,17 @@ function MemoryDocumentList({
   return (
     <section className={compact ? "mt-6" : undefined}>
       {compact ? (
-        <h3 className="mb-2 text-xs font-medium text-muted-foreground">
+        <SectionHeading variant="label" className="mb-2">
           <Trans>Memory</Trans>
-        </h3>
+        </SectionHeading>
       ) : null}
       <div data-testid={testId} className={compact ? "rounded-xl bg-muted/50 p-4" : undefined}>
         {error ? <div className="pb-2 text-[13px] text-destructive">{error}</div> : null}
+        {kb > 0 ? (
+          <p className="pb-2 text-[13px] text-muted-foreground" data-testid="memory-budget-note">
+            {t`About ${kb} KB of memory no longer reaches the bot.`}
+          </p>
+        ) : null}
         {conflicted ? (
           <div className="pb-2 text-[13px] text-destructive">
             <Trans>Document changed. Reopen to edit the latest version.</Trans>
@@ -331,9 +356,10 @@ export function AgentSkills() {
   const error = actionError ?? (listQuery.isError ? t`Could not load` : null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const selection = useRef(0);
+  const spaceCount = useOwnSpaces().length;
 
   async function refresh() {
-    await fetchFresh(queryClient, list);
+    return fetchFresh(queryClient, list);
   }
 
   useEffect(
@@ -440,7 +466,10 @@ export function AgentSkills() {
                 >
                   {entry.name}
                 </span>
-                <SkillSourceBadge source={entry.source} />
+                <span className="flex shrink-0 items-center gap-2">
+                  <AvailabilityLabel availability={entry.availability} />
+                  <SkillSourceBadge source={entry.source} />
+                </span>
               </span>
               <span
                 className="mt-0.5 block truncate text-[12.5px] text-muted-foreground"
@@ -452,13 +481,36 @@ export function AgentSkills() {
           ))
         : null}
       {editorOpen ? (
-        <div className="px-2.5 pb-2">
+        <div className="pb-2">
           {open ? (
-            <div className="flex items-center gap-2 pb-1">
+            <div className="flex min-h-7 items-center gap-2">
               <div className="min-w-0 truncate text-[14px] font-normal text-foreground" dir="auto">
                 {open.name}
               </div>
               <SkillSourceBadge source={open.source} />
+              {open.source === "user" ? (
+                <div className="ms-auto">
+                  <AvailabilityControl
+                    kind="skill"
+                    id={open.id}
+                    availability={open.availability}
+                    onChanged={async () => {
+                      // Another skill may have been opened while this was saving; leave it alone.
+                      const opened = selection.current;
+                      // Narrowed away from this space, the skill can no longer be read here.
+                      const here = (await refresh()).some((entry) => entry.id === open.id);
+                      if (selection.current !== opened) return;
+                      if (!here) {
+                        selection.current += 1;
+                        setOpen(null);
+                        return;
+                      }
+                      const fresh = await rpc.agentSkills.get({ skillId: open.id });
+                      if (selection.current === opened) setOpen(fresh);
+                    }}
+                  />
+                </div>
+              ) : null}
             </div>
           ) : null}
           <Textarea
@@ -507,7 +559,15 @@ export function AgentSkills() {
                   confirmingDelete ? "bg-destructive/10 text-destructive" : "text-destructive"
                 }`}
               >
-                {confirmingDelete ? <Trans>Confirm delete</Trans> : <Trans>Delete</Trans>}
+                {confirmingDelete ? (
+                  reachesOtherSpaces(open.availability, spaceCount) ? (
+                    <Trans>Remove from every space?</Trans>
+                  ) : (
+                    <Trans>Confirm delete</Trans>
+                  )
+                ) : (
+                  <Trans>Delete</Trans>
+                )}
               </Button>
             ) : null}
           </div>

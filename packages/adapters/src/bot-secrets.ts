@@ -21,12 +21,22 @@ import {
   LOGIN_FIELD_LIMIT,
   LoginFieldLabels,
   loginCommandName,
+  ONE_TIME_CODE_MIN_LENGTH,
+  OneTimeCodeTarget,
   SecretHttpRequest,
   sameLoginFieldLabel,
 } from "@anviq/contracts";
 import type { Prisma, PrismaClient } from "@anviq/db";
-import { lockSpaceSettings, settingsTarget, withTransactionRetry } from "@anviq/db";
+import {
+  lockSpaceSettings,
+  runCodeKind,
+  runCodeSpentKind,
+  runLoginKind,
+  settingsTarget,
+  withTransactionRetry,
+} from "@anviq/db";
 import { getLogger } from "@anviq/logging";
+import { z } from "zod";
 import { combineSignals, redactConnectorPayload } from "./connector-safety.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { createPrivateNetworkFetch, createSafeRemoteFetch } from "./remote-mcp.js";
@@ -237,10 +247,16 @@ export async function findCommandVariableConflict(
   )?.name;
 }
 
+/** The bot must tell the user why it falls back to a takeover, so the refusal says so. */
+const NOT_HTTPS_CODE =
+  "Codes can only be typed on HTTPS pages, and this page isn't HTTPS. Ask the user to take over and tell them that is why.";
+
 export type RequestSecretDestinationResult = {
   /** Metadata only. The protected value is never part of this result. */
   destination?: BotSecretDestination;
   connectionId?: string;
+  /** The HTTPS origin a texted or emailed code is for. */
+  oneTimeCodeOrigin?: string;
   error?: string;
 };
 
@@ -268,7 +284,27 @@ export function resolveRequestSecretDestination(
   }
   const connectionId = connectionIdArgument(args.connectionId);
   if (connectionId) return { connectionId };
-  return { error: "Provide either a reusable credential destination or a connectionId." };
+  if (args.oneTimeCode !== undefined) {
+    const target = OneTimeCodeTarget.safeParse(args.oneTimeCode);
+    if (target.success) return { oneTimeCodeOrigin: target.data.origin };
+    const origin = isPlainObject(args.oneTimeCode) ? args.oneTimeCode.origin : undefined;
+    return {
+      error:
+        typeof origin === "string" && URL.canParse(origin) && new URL(origin).protocol === "http:"
+          ? NOT_HTTPS_CODE
+          : "oneTimeCode needs the HTTPS origin of the page that asked for the code.",
+    };
+  }
+  return {
+    error:
+      "Provide either a reusable credential destination, a connectionId, or oneTimeCode for a code the page asked for.",
+  };
+}
+
+/** `{ origin }` only, reduced to the site: a code is never tied to a path, query or userinfo. */
+export function oneTimeCodeArgument(value: unknown): unknown {
+  if (!isPlainObject(value)) return value === undefined ? undefined : {};
+  return { origin: originMetadata(value.origin) ?? "invalid-origin" };
 }
 
 /** Labels only, also from `{ label, hidden }` objects, so a bot's `hidden` is never recorded. */
@@ -279,8 +315,9 @@ export function loginFieldLabelsArgument(value: unknown): unknown {
 }
 
 /**
- * The field labels a login card asks for. Only labels: whether a field is hidden is the person's
- * choice on the card, so anything else the bot sends with a field is dropped.
+ * The field labels a login card asks for. Only labels: the card derives each field's starting
+ * state from its label, the person has the last word, and anything else the bot sends with a
+ * field is dropped.
  */
 export function requestedLoginFields(value: unknown): { labels?: string[]; error?: string } {
   if (value === undefined || value === null) return {};
@@ -433,12 +470,47 @@ export function sameSecretDestination(
   );
 }
 
+/** Only an HTTPS login moves to another site; nothing else about it changes. */
+export function canReplaceLoginSite(
+  saved: BotSecretDestination,
+  destination: BotSecretDestination,
+): boolean {
+  return (
+    saved.auth.type === "login" &&
+    destination.origin.startsWith("https://") &&
+    sameSecretDestination({ ...saved, origin: destination.origin }, destination)
+  );
+}
+
+/** The credential saved under `name`. Its row id is for a card that replaces it, never for the bot. */
 export async function findBotSecret(prisma: PrismaClient, scope: BotSecretScope, name: string) {
   const row = await prisma.vaultCredential.findFirst({
     where: { ...(await vaultFields(prisma, scope)), name },
+    select: { ...metadata, id: true },
+  });
+  return row ? { id: row.id, destination: normalizeSecretDestination(row) } : null;
+}
+
+/**
+ * The one login saved for exactly this HTTPS site, whatever its name. Bots name logins themselves,
+ * so a later request under another name for the same site still finds it. None when two are saved.
+ */
+export async function findSiteLogin(prisma: PrismaClient, scope: BotSecretScope, origin: string) {
+  if (!origin.startsWith("https://")) return null;
+  const rows = await prisma.vaultCredential.findMany({
+    where: { ...(await vaultFields(prisma, scope)), origin },
     select: metadata,
   });
-  return row ? normalizeSecretDestination(row) : null;
+  // A row saved before today's name or site rules can't be filled, so it doesn't count.
+  const logins = rows.flatMap((row) => {
+    try {
+      const login = normalizeSecretDestination(row);
+      return login.auth.type === "login" ? [login] : [];
+    } catch {
+      return [];
+    }
+  });
+  return logins.length === 1 ? logins[0] : null;
 }
 
 export async function prepareBotSecret(input: {
@@ -449,6 +521,11 @@ export async function prepareBotSecret(input: {
   plaintext: string;
   /** Refuse instead of replacing a credential saved under this name, even by a concurrent call. */
   createOnly?: boolean;
+  /**
+   * The id of the saved login of this name that this login replaces, from a login card the person
+   * answered for another site. Without it, a credential's destination never changes.
+   */
+  replaces?: string;
 }) {
   const { prisma, secretStore, scope } = input;
   let { plaintext } = input;
@@ -471,7 +548,12 @@ export async function prepareBotSecret(input: {
   });
   function validate(row: typeof existing, count: number) {
     if (row && input.createOnly) throw new Error(SECRET_ALREADY_SAVED);
-    if (row && !sameSecretDestination(normalizeSecretDestination(row), destination))
+    const saved = row && normalizeSecretDestination(row);
+    if (
+      saved &&
+      !sameSecretDestination(saved, destination) &&
+      !(row?.id === input.replaces && canReplaceLoginSite(saved, destination))
+    )
       throw new Error("Remove the existing credential before changing its destination");
     if (!row && count >= 100) throw new Error("Credential limit reached");
   }
@@ -509,8 +591,12 @@ export async function prepareBotSecret(input: {
       }
       if (current?.id !== existing?.id)
         throw Object.assign(new Error("Credential changed while saving; retry"), { code: "P2034" });
+      // The site and the value change together; validate allowed another site only when replacing.
       if (current)
-        await tx.vaultCredential.update({ where: { id }, data: { ciphertext: stored.ciphertext } });
+        await tx.vaultCredential.update({
+          where: { id },
+          data: { origin: destination.origin, ciphertext: stored.ciphertext },
+        });
       else
         await tx.vaultCredential.create({
           data: { id, ...vault, ...destination, ciphertext: stored.ciphertext },
@@ -580,7 +666,7 @@ export async function generateBotSecret(input: {
   const command: BotSecretDestination | undefined = parsed.data.command
     ? { name: loginCommandName(name), origin: "", auth: { type: "command" } }
     : undefined;
-  const existing = await findBotSecret(input.prisma, input.scope, name);
+  const existing = (await findBotSecret(input.prisma, input.scope, name))?.destination;
   if (existing) {
     return {
       result: sameSecretDestination(existing, destination)
@@ -853,25 +939,153 @@ export function findLoginField(fields: readonly LoginField[], name: string) {
   return undefined;
 }
 
+/** A login kept for one run only: its fields with the card's site, stored as one secret. */
+export function encodeRunLogin(origin: string, login: string): string {
+  return JSON.stringify({ origin, login });
+}
+
+const RunCodeValue = z.object({ origin: z.string(), code: z.string() });
+
+/** A code answered in chat, kept with the site it is for until it is typed there. */
+export function encodeRunCode(origin: string, code: string): string {
+  return JSON.stringify({ origin, code });
+}
+
+/** The run's code row as stored, or nothing when it cannot be read; only the error name is logged. */
+export async function readRunCode(
+  secretStore: Pick<SecretStore, "load">,
+  row: { id: string; ciphertext: string },
+): Promise<{ origin: string; code: string } | undefined> {
+  try {
+    return RunCodeValue.parse(JSON.parse(await secretStore.load(row.ciphertext, row.id)));
+  } catch (error) {
+    getLogger().warn("one-time code could not be read", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+    return undefined;
+  }
+}
+
 /**
- * Resolve one field of a saved website login for a page fill. The caller must pass `origin` to
- * the page browser, which refuses to fill unless the page is still on that origin, and must type
- * a hidden field only into a password field.
+ * Every form of a code the model could be handed: as is, without dashes, URL-encoded, in either
+ * case, and as a page draws it per character or in two groups (input-otp widgets put each digit in
+ * its own element, which a snapshot reads as one digit per line).
+ */
+export function oneTimeCodeRedactions(code: string): string[] {
+  const forms = new Set<string>();
+  const joins = ["\n", "\r\n", " ", "\t", "-", " - "];
+  const digits = code.replaceAll("-", "");
+  // A bare short number such as 2026 would blank years and prices for the rest of the run.
+  const bare = digits.length >= 6 || /[A-Za-z]/.test(digits);
+  for (const written of new Set([code, code.toUpperCase(), code.toLowerCase()])) {
+    for (const base of new Set([written, written.replaceAll("-", "")])) {
+      if (bare) forms.add(base).add(encodeURIComponent(base));
+      for (const join of joins) forms.add([...base].join(join));
+      const half = Math.ceil(base.length / 2);
+      for (const join of joins) forms.add(`${base.slice(0, half)}${join}${base.slice(half)}`);
+    }
+  }
+  // A short form would blank ordinary text in every later result.
+  return [...forms].filter((form) => form.length >= ONE_TIME_CODE_MIN_LENGTH);
+}
+
+const RunLoginValue = z.object({ origin: z.string(), login: z.string() });
+
+function decodeRunLogin(plaintext: string): LoginSecretValue & { origin: string } {
+  const { origin, login } = RunLoginValue.parse(JSON.parse(plaintext));
+  return { origin, ...decodeLoginSecret(login) };
+}
+
+/** This run's login under `name` that the person chose not to save, if any. */
+export async function findRunLogin(
+  prisma: PrismaClient,
+  secretStore: Pick<SecretStore, "load">,
+  scope: BotSecretScope,
+  runId: string,
+  name: string,
+): Promise<(LoginSecretValue & { origin: string }) | undefined> {
+  const row = await prisma.secret.findFirst({
+    where: { userId: scope.userId, spaceId: scope.spaceId, kind: runLoginKind(runId, name) },
+    select: { id: true, ciphertext: true },
+  });
+  return row ? decodeRunLogin(await secretStore.load(row.ciphertext, row.id)) : undefined;
+}
+
+/**
+ * Redaction forms of this run's logins that weren't saved, from the start of the run: hidden
+ * fields as every run hides a saved login's, and every field as the run that fills one does.
+ */
+export async function loadRunLoginRedactions(
+  prisma: PrismaClient,
+  secretStore: Pick<SecretStore, "load">,
+  scope: BotSecretScope,
+  runId: string,
+): Promise<string[]> {
+  const rows = await prisma.secret.findMany({
+    where: {
+      userId: scope.userId,
+      spaceId: scope.spaceId,
+      kind: { startsWith: runLoginKind(runId, "") },
+    },
+    select: { id: true, ciphertext: true },
+  });
+  const forms = new Set<string>();
+  for (const row of rows) {
+    const { fields } = decodeRunLogin(await secretStore.load(row.ciphertext, row.id));
+    for (const form of loginFillRedactions(fields)) forms.add(form);
+    for (const field of fields) {
+      if (!field.hidden || field.value.length < MIN_REDACTED_HIDDEN_VALUE_EVERY_RUN) continue;
+      for (const form of passwordRedactionForms(field.value)) forms.add(form);
+    }
+  }
+  return [...forms];
+}
+
+function loginFillRedactions(fields: readonly LoginField[]): string[] {
+  return [
+    ...new Set(
+      fields
+        .filter((entry) => entry.hidden || entry.value.length >= MIN_REDACTED_VISIBLE_VALUE)
+        .flatMap((entry) => [entry.value, encodeURIComponent(entry.value)]),
+    ),
+  ];
+}
+
+const HTTPS_ONLY = "Website logins can only be filled on an HTTPS origin.";
+
+/**
+ * Resolve one field of a website login for a page fill: this run's login that wasn't saved under
+ * the name first, since it is what the person just typed, then a saved one. The caller must pass
+ * `origin` to the page browser, which refuses to fill unless the page is still on that origin,
+ * and must type a hidden field only into a password field.
  */
 export async function resolveLoginFill(input: {
   prisma: PrismaClient;
   secretStore: SecretStore;
   scope: BotSecretScope;
+  runId: string;
   name: string;
   field: string;
 }): Promise<
   { text: string; hidden: boolean; origin: string; redactions: string[] } | { error: string }
 > {
-  const row = await input.prisma.vaultCredential.findFirst({
-    where: { ...(await vaultFields(input.prisma, input.scope)), name: input.name },
-  });
-  if (!row) return { error: "Login is unavailable. Use request_secret to save it first." };
-  if (isCommandCredential(row.auth)) {
+  const runLogin = await findRunLogin(
+    input.prisma,
+    input.secretStore,
+    input.scope,
+    input.runId,
+    input.name,
+  );
+  const row = runLogin
+    ? undefined
+    : await input.prisma.vaultCredential.findFirst({
+        where: { ...(await vaultFields(input.prisma, input.scope)), name: input.name },
+      });
+  const stored = runLogin
+    ? { name: input.name, origin: runLogin.origin, auth: { type: "login" } }
+    : row;
+  if (!stored) return { error: "Login is unavailable. Use request_secret to save it first." };
+  if (isCommandCredential(stored.auth)) {
     return {
       error: `${UNUSABLE_CREDENTIAL}. Command variables are only available to shell commands.`,
     };
@@ -879,21 +1093,18 @@ export async function resolveLoginFill(input: {
   // Checked on the stored origin itself, so the private-LAN HTTP allowance cannot widen a login.
   let storedOrigin: URL;
   try {
-    storedOrigin = new URL(row.origin);
+    storedOrigin = new URL(stored.origin);
   } catch {
-    return { error: "Website logins can only be filled on an HTTPS origin." };
+    return { error: HTTPS_ONLY };
   }
-  if (storedOrigin.protocol !== "https:") {
-    return { error: "Website logins can only be filled on an HTTPS origin." };
-  }
-  const destination = normalizeSecretDestination(row);
+  if (storedOrigin.protocol !== "https:") return { error: HTTPS_ONLY };
+  const destination = normalizeSecretDestination(stored);
   if (destination.auth.type !== "login") {
     return { error: "This credential is not a website login." };
   }
-  if (destination.origin !== storedOrigin.origin) {
-    return { error: "Website logins can only be filled on an HTTPS origin." };
-  }
-  const { fields } = decodeLoginSecret(await input.secretStore.load(row.ciphertext, row.id));
+  if (destination.origin !== storedOrigin.origin) return { error: HTTPS_ONLY };
+  const { fields } =
+    runLogin ?? decodeLoginSecret(await input.secretStore.load(row!.ciphertext, row!.id));
   const field = findLoginField(fields, input.field);
   if (!field) {
     return {
@@ -904,12 +1115,85 @@ export async function resolveLoginFill(input: {
     text: field.value,
     hidden: field.hidden,
     origin: destination.origin,
-    redactions: [
-      ...new Set(
-        fields
-          .filter((entry) => entry.hidden || entry.value.length >= MIN_REDACTED_VISIBLE_VALUE)
-          .flatMap((entry) => [entry.value, encodeURIComponent(entry.value)]),
-      ),
-    ],
+    redactions: loginFillRedactions(fields),
+  };
+}
+
+/**
+ * Redaction forms of this run's codes, those waiting and those the page took, from the start of
+ * every attempt: a filled code stays on its page and in what the run has read.
+ */
+export async function loadRunCodeRedactions(
+  prisma: PrismaClient,
+  secretStore: Pick<SecretStore, "load">,
+  scope: BotSecretScope,
+  runId: string,
+): Promise<string[]> {
+  const rows = await prisma.secret.findMany({
+    where: {
+      userId: scope.userId,
+      spaceId: scope.spaceId,
+      kind: { in: [runCodeKind(runId), runCodeSpentKind(runId)] },
+    },
+    select: { id: true, ciphertext: true },
+  });
+  const forms = new Set<string>();
+  for (const row of rows) {
+    const held = await readRunCode(secretStore, row);
+    for (const form of held ? oneTimeCodeRedactions(held.code) : []) forms.add(form);
+  }
+  return [...forms];
+}
+
+const NO_CODE_WAITING =
+  "No code is waiting. Use request_secret with oneTimeCode to ask the user for it first.";
+
+/**
+ * This run's code for a page fill. Like a login's, the caller must pass `origin` to the page
+ * browser, which refuses to fill unless the page is still on it. The code is only read here:
+ * `claim` takes it for one fill, atomically, so two fills never both get it, and `restore` gives
+ * it back when the page refused, so the fill can be tried again on the right page. A claimed code
+ * stays as a spent row, which the run keeps hiding until it ends.
+ */
+export async function resolveCodeFill(input: {
+  prisma: PrismaClient;
+  secretStore: SecretStore;
+  scope: BotSecretScope;
+  runId: string;
+}): Promise<
+  | {
+      text: string;
+      origin: string;
+      redactions: string[];
+      claim: () => Promise<boolean>;
+      restore: () => Promise<void>;
+    }
+  | { error: string }
+> {
+  const where = { userId: input.scope.userId, spaceId: input.scope.spaceId };
+  const row = await input.prisma.secret.findFirst({
+    where: { ...where, kind: runCodeKind(input.runId) },
+    select: { id: true, ciphertext: true },
+  });
+  if (!row) return { error: NO_CODE_WAITING };
+  const held = await readRunCode(input.secretStore, row);
+  if (!held) return { error: "This code could not be loaded." };
+  if (!URL.canParse(held.origin) || new URL(held.origin).protocol !== "https:")
+    return { error: NOT_HTTPS_CODE };
+  const move = async (from: string, to: string) =>
+    (
+      await input.prisma.secret.updateMany({
+        where: { id: row.id, kind: from },
+        data: { kind: to },
+      })
+    ).count === 1;
+  return {
+    text: held.code,
+    origin: held.origin,
+    redactions: oneTimeCodeRedactions(held.code),
+    claim: () => move(runCodeKind(input.runId), runCodeSpentKind(input.runId)),
+    restore: async () => {
+      await move(runCodeSpentKind(input.runId), runCodeKind(input.runId));
+    },
   };
 }

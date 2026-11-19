@@ -1,7 +1,12 @@
 import type { Actor, MessageBlock } from "@anviq/contracts";
 import { QUEUE_HOLDING_RUN_STATUSES } from "@anviq/core";
 import type { Prisma, PrismaClient, ThreadEvents } from "@anviq/db";
-import { appendEventInTransaction, IsolationError, withTransactionRetry } from "@anviq/db";
+import {
+  appendEventInTransaction,
+  availableInSpace,
+  IsolationError,
+  withTransactionRetry,
+} from "@anviq/db";
 import { requireBotThread } from "./bot-thread.js";
 
 export type McpApprovalDeps = {
@@ -306,7 +311,7 @@ export async function queueMcpConnectedRun(
       select: { id: true },
     }),
     tx.mcpServer.findFirst({
-      where: { id: input.serverId, spaceId: actor.spaceId, userId: actor.userId },
+      where: { id: input.serverId, ...availableInSpace(actor) },
       select: { name: true },
     }),
   ]);

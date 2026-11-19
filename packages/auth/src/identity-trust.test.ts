@@ -726,6 +726,17 @@ describe("identity confirmation", () => {
     expect(await reused.json()).toMatchObject({ code: "OTP_EXPIRED" });
   });
 
+  it("writes a code email in the language the account last used the app in", async () => {
+    const f = fixture();
+    const token = await codeAccount(f);
+    const user = f.data.user!.find((row) => row.email === "approved@example.test")!;
+    user.locale = "es";
+    expect((await f.request("/request-identity-code", {}, token)).status).toBe(200);
+    expect(f.messages.at(-1)).toMatchObject({
+      subject: "Tu código de confirmación de Anviq Agents",
+    });
+  });
+
   it("binds an emailed code to the session that requested it", async () => {
     const f = fixture();
     const token = await codeAccount(f);
@@ -1082,6 +1093,30 @@ describe("passkeys", () => {
     const f = fixture({ webOrigin: "http://web.example.test" });
     expect(f.auth.passkeyRpId).toBeNull();
     expect((await f.request("/passkey/generate-authenticate-options")).status).toBe(404);
+  });
+});
+
+describe("account export tokens", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("names the issuing user once, and stores only a hash", async () => {
+    const f = fixture({ delivery: false });
+    const token = await f.auth.issueAccountExportToken("user-a");
+    const other = await f.auth.issueAccountExportToken("user-b");
+    expect(JSON.stringify(f.data.verification)).not.toContain(token);
+    expect(await f.auth.consumeAccountExportToken(token)).toBe("user-a");
+    expect(await f.auth.consumeAccountExportToken(token)).toBeNull();
+    expect(await f.auth.consumeAccountExportToken(other)).toBe("user-b");
+    expect(await f.auth.consumeAccountExportToken("")).toBeNull();
+    expect(await f.auth.consumeAccountExportToken("made-up")).toBeNull();
+  });
+
+  it("expires after a minute", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const f = fixture({ delivery: false });
+    const token = await f.auth.issueAccountExportToken("user-a");
+    vi.setSystemTime(Date.now() + 60_000);
+    expect(await f.auth.consumeAccountExportToken(token)).toBeNull();
   });
 });
 

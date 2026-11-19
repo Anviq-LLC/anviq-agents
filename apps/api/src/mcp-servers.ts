@@ -10,9 +10,11 @@ import {
 import type { Actor, McpServer, McpServerConfigInput } from "@anviq/contracts";
 import { mcpOAuthEnvReferences } from "@anviq/contracts";
 import type { McpServer as McpServerRow, Prisma } from "@anviq/db";
+import { itemSecretIn, spaceAvailability } from "@anviq/db";
 import { getLogger } from "@anviq/logging";
 import { ORPCError } from "@orpc/server";
 import { isAdmin } from "./admins.js";
+import { assertNameFreeWhereAvailable, userAddedAvailability } from "./availability.js";
 import { dismissMcpServerApprovals } from "./mcp-approval.js";
 import type { McpSecretMaterial } from "./mcp-material.js";
 import { legacyMcpArgs } from "./mcp-material.js";
@@ -36,7 +38,11 @@ export function mcpServerDto(
     headers: unknown;
     secretId: string | null;
     installId?: string | null;
+    allSpaces?: boolean;
+    availableIn?: Array<{ spaceId: string }>;
+    allBots?: boolean;
     enabled: boolean;
+    verbatimResults?: boolean;
     revision: number;
     healthStatus: string;
     healthMessage: string | null;
@@ -70,8 +76,11 @@ export function mcpServerDto(
     oauthStatus: oauth.status,
     oauthClientId: oauth.clientId,
     enabled: row.enabled,
+    verbatimResults: row.verbatimResults ?? false,
     revision: row.revision,
     health: mcpServerHealthDto(row),
+    availability: spaceAvailability({ ...row, allSpaces: row.allSpaces ?? false }),
+    allBots: row.allBots ?? false,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -210,7 +219,7 @@ export function createMcpServers(
     if (oauth.status === "connected") return false;
     const secret = server.secretId
       ? await deps.prisma.secret.findFirst({
-          where: { id: server.secretId, spaceId: actor.spaceId, userId: actor.userId },
+          where: { id: server.secretId, ...itemSecretIn(actor) },
         })
       : null;
     const material: McpSecretMaterial = secret
@@ -276,13 +285,7 @@ export function createMcpServers(
     const painted = await dismissMcpServerApprovals(onboardingDeps, actor, server.id, tx);
     await tx.mcpServer.delete({ where: { id: server.id } });
     if (server.secretId) {
-      await tx.secret.deleteMany({
-        where: {
-          id: server.secretId,
-          spaceId: actor.spaceId,
-          userId: actor.userId,
-        },
-      });
+      await tx.secret.deleteMany({ where: { id: server.secretId, ...itemSecretIn(actor) } });
     }
     return painted;
   };
@@ -303,13 +306,23 @@ export function createMcpServers(
     actor: Actor,
     input: McpServerConfigInput,
     stored: Awaited<ReturnType<typeof prepareMcpServer>>,
+    // What the user adds reaches all their spaces and agents; an import stays with its agent.
+    options: { everywhere?: boolean } = {},
   ) => {
+    if (options.everywhere)
+      await assertNameFreeWhereAvailable(
+        tx,
+        "mcpServer",
+        actor,
+        input.slug,
+        userAddedAvailability(actor),
+      );
     if (stored) {
       await tx.secret.create({
         data: {
           id: stored.id,
           userId: actor.userId,
-          spaceId: actor.spaceId,
+          spaceId: options.everywhere ? null : actor.spaceId,
           kind: "mcp",
           ciphertext: stored.ciphertext,
         },
@@ -319,6 +332,8 @@ export function createMcpServers(
       data: {
         spaceId: actor.spaceId,
         userId: actor.userId,
+        allSpaces: options.everywhere ?? false,
+        allBots: options.everywhere ?? false,
         slug: input.slug,
         name: input.name,
         description: input.description,
@@ -337,6 +352,7 @@ export function createMcpServers(
           : {}) as Prisma.InputJsonValue,
         secretId: stored?.id,
         enabled: input.enabled,
+        verbatimResults: input.verbatimResults,
       },
     });
   };

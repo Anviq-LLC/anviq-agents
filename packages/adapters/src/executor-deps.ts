@@ -16,7 +16,7 @@ import type {
   SecretStore,
   WebProvider,
 } from "@anviq/adapter-kit";
-import type { PrismaClient, ThreadEvents } from "@anviq/db";
+import type { PrismaClient, RunLease, ThreadEvents } from "@anviq/db";
 import type { CloudAgentConnection } from "./cloud-agent-factory.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import type { CodexLiveCatalog } from "./pi-codex-catalog.js";
@@ -81,4 +81,6 @@ export interface ExecutorDeps {
   userDevices?: UserDeviceGateway;
   /** Aborted when createApp stop() begins so in-flight continueRun boot waits exit promptly. */
   shutdownSignal?: AbortSignal;
+  /** Set by withRunLease for one attempt; that run's history writes carry its lease. */
+  runLease?: RunLease & { runId: string };
 }

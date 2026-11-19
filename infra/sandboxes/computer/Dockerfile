@@ -121,6 +121,10 @@ RUN set -eux; \
   tar -xzf "$archive" -C /usr/local/bin --strip-components=2 "gh_${GH_VERSION}_linux_${gh_arch}/bin/gh"; \
   rm -f "$archive"; \
   gh --version
+# The page browser drives the visible Chromium through agent-browser, pinned and checked by sha256.
+COPY --chmod=755 install-agent-browser.sh /tmp/install-agent-browser.sh
+RUN /tmp/install-agent-browser.sh /usr/local/bin && rm /tmp/install-agent-browser.sh \
+  && mkdir -p /usr/local/lib/anviq
 ENV DISPLAY=:1
 ENV HOME=/home/anviq
 # Keep UTF-8 explicit (an empty LANG broke non-ASCII file handling in the
@@ -130,8 +134,7 @@ RUN sed -i 's/^# zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen && locale
 ENV LANG=C.UTF-8
 ENV UV_TOOL_DIR=/home/anviq/.local/share/uv/tools \
     UV_TOOL_BIN_DIR=/home/anviq/.local/bin \
-    UV_PYTHON_INSTALL_DIR=/home/anviq/.local/share/uv/python \
-    UV_CACHE_DIR=/home/anviq/.cache/uv
+    UV_PYTHON_INSTALL_DIR=/home/anviq/.local/share/uv/python
 WORKDIR /home/anviq
 # --chmod normalizes modes: a restrictive host umask (e.g. 077 on hardened hosts) would
 # otherwise leave these files unreadable to USER 1000 at runtime.
@@ -145,8 +148,10 @@ COPY --from=capture-builder /build/libanviq-xcapture.so /usr/local/lib/libanviq-
 COPY --chmod=755 anviq-browser /usr/local/bin/anviq-browser
 COPY --chmod=755 anviq-focus-or-launch /usr/local/bin/anviq-focus-or-launch
 COPY --chmod=755 anviq-page-browser /usr/local/bin/anviq-page-browser
+COPY --chmod=644 page_secrets.py /usr/local/lib/anviq/page_secrets.py
 COPY --chmod=644 anviq-browser.desktop /usr/share/applications/anviq-browser.desktop
 # Anviq Agents keeps credentials itself; the browser's save prompts would cover pages.
+# Pop-ups open: one a page opens after making a report would be blocked unseen.
 COPY --chmod=644 browser-policy.json /etc/chromium/policies/managed/anviq-browser.json
 COPY --chmod=644 browser-policy.json /etc/brave/policies/managed/anviq-browser.json
 COPY --chmod=644 fluxbox.init /etc/anviq/fluxbox/init
@@ -161,6 +166,7 @@ COPY --chmod=644 anviq-local-bin.sh /etc/profile.d/anviq-local-bin.sh
 # Strip CR so shebangs work even if the build context came from a CRLF checkout.
 RUN ldconfig \
   && sed -i 's/\r$//' /usr/local/bin/anviq-computer /usr/local/lib/anviq-user-env.sh /usr/local/bin/anviq-computer-control /usr/local/bin/anviq-browser /usr/local/bin/anviq-focus-or-launch /usr/local/bin/anviq-page-browser \
+    /usr/local/lib/anviq/page_secrets.py \
     /etc/anviq/fluxbox/init /etc/anviq/fluxbox/apps /etc/anviq/fluxbox/menu \
     /etc/profile.d/anviq-local-bin.sh
 # Agent-authored scripts often use the unversioned name. Keep it on the installed Python 3.

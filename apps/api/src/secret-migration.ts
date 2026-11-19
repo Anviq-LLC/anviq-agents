@@ -32,7 +32,9 @@ export function createSecretMigrationRepository(prisma: PrismaClient): SecretMig
                 label === "integrationProviderConfig" || label === "userIntegrationProviderConfig"
                   ? `integration-provider:${row.id}`
                   : row.id,
-              ephemeral: row.kind?.startsWith("run-secret:"),
+              ephemeral: ["run-secret:", "run-login:", "run-code:", "run-code-spent:"].some(
+                (prefix) => row.kind?.startsWith(prefix),
+              ),
             };
           if (batch.length < 100) break;
           cursor = batch.at(-1)?.id;

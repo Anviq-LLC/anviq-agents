@@ -1,7 +1,7 @@
 import { markdownCodeBlocks } from "@anviq/chat-ui/native";
-import type { LoginFieldInput, MessageReaction } from "@anviq/contracts";
+import type { BotAvatarSet, LoginFieldInput, MessageReaction } from "@anviq/contracts";
 import { canReactToThreadMessage, MESSAGE_REACTIONS } from "@anviq/contracts";
-import type { ChildBotBlock } from "@anviq/core";
+import type { ChildBotBlock, PeerExchange } from "@anviq/core";
 import { canMarkMessageUnread, isPeerReceiptBlocks, liveMessageComposing } from "@anviq/core";
 import { typeScale } from "@anviq/ui-tokens";
 import * as Clipboard from "expo-clipboard";
@@ -24,7 +24,6 @@ import { ThreadReadOnlyContext } from "../../lib/thread-read-only";
 import type { UserBubble } from "../../lib/user-bubble";
 import { BotAvatar } from "../bot-avatar";
 import type { ImageArtifactPreviewTarget } from "../image-artifact-viewer";
-import type { MarkdownArtifactPreviewTarget } from "../markdown-artifact-preview";
 import { presentMessageMenu } from "../message-action-menu";
 import { MessageContextMenu } from "../message-context-menu";
 import { ReplyLine } from "../reply-line";
@@ -50,14 +49,14 @@ export type MessageRowActions = {
     answer: string,
     fields?: readonly LoginFieldInput[],
     dismiss?: boolean,
+    remember?: false,
   ) => Promise<void>;
   openBot: (id: string, name: string) => void;
   openComputer: (id: string, name: string) => void;
-  previewMarkdown: (target: MarkdownArtifactPreviewTarget) => void;
+  previewFile: (artifactId: string) => void;
   previewImage: (target: ImageArtifactPreviewTarget) => void;
   jump: (messageId: string) => void;
   dismissChoice: (messageId: string, question: string) => void;
-  togglePeerReplies: (markerId: string) => void;
   openPeerChat: (peer: { peerBotId: string; peerBotName: string }) => void;
   layout: (messageId: string, y: number, index: number) => void;
 };
@@ -88,10 +87,11 @@ type MessageRowProps = {
   waitingForUser: boolean;
   messageReactions?: ReadonlyMap<MessageReaction, number>;
   mentions?: readonly ChildBotBlock[];
-  /** Set on a received marker whose peer run has folded replies. */
-  peerReplies?: "collapsed" | "expanded";
+  /** The adjacent receipts represented by this peer line. */
+  peerExchange?: PeerExchange;
   activityBotId?: string;
   activityColor?: string;
+  activityAvatarSet?: BotAvatarSet;
   activityStatus?: MobileBot["status"];
   userBubble?: UserBubble;
   inGroup: boolean;
@@ -125,9 +125,10 @@ export const MessageRow = memo(function MessageRow({
   messageReactions,
   mentions,
   waitingForUser,
-  peerReplies,
+  peerExchange,
   activityBotId,
   activityColor,
+  activityAvatarSet,
   activityStatus,
   userBubble,
   inGroup,
@@ -392,6 +393,7 @@ export const MessageRow = memo(function MessageRow({
           <View style={{ paddingTop: 22 }}>
             <BotAvatar
               color={activityColor ?? tokens.mutedForeground}
+              avatarSet={activityAvatarSet}
               identity={activityBotId}
               size={inGroup ? 20 : 28}
               status={activityStatus}
@@ -457,10 +459,9 @@ export const MessageRow = memo(function MessageRow({
                 onOpenBot={actions.openBot}
                 onOpenComputer={actions.openComputer}
                 onChoiceDismissed={onChoiceDismissed}
-                onPreviewMarkdown={actions.previewMarkdown}
+                onPreviewFile={actions.previewFile}
                 onPreviewImage={actions.previewImage}
-                peerReplies={peerReplies}
-                onTogglePeerReplies={actions.togglePeerReplies}
+                peerExchange={peerExchange}
                 onOpenPeerChat={actions.openPeerChat}
                 actionProps={actionProps}
                 doubleTapSurface={Boolean(likeMessage)}

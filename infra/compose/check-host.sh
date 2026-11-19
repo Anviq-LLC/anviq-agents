@@ -44,6 +44,10 @@ else
   done
 fi
 
+if [[ -e /run/reboot-required ]]; then
+  report "Installed updates need a reboot to take effect"
+fi
+
 if grep -q '^ANVIQ_AUDIT_SINK_URL=.' /etc/anviq/audit-ship.env 2>/dev/null && ! systemctl is-active --quiet anviq-audit-ship.service; then
   report "Audit trail shipping is not running"
 fi

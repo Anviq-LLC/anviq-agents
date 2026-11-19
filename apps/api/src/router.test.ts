@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ManagedConnectorProvider } from "@anviq/adapter-kit";
-import { SecretStoreUnavailableError } from "@anviq/adapter-kit";
+import { ConnectorAuthUnavailableError, SecretStoreUnavailableError } from "@anviq/adapter-kit";
 import type { McpOAuthSummary } from "@anviq/adapters";
 import * as adapters from "@anviq/adapters";
 import {
@@ -15,6 +15,7 @@ import {
   IntegrationProviderSettings,
   LocalAgentHomeStore,
   listPiCatalog,
+  McpOAuthClientRequiredError,
   ModelSignInError,
   modelCredentialDto,
   parseModelSecret,
@@ -22,11 +23,21 @@ import {
   serializeModelSecret,
 } from "@anviq/adapters";
 import type { Actor, Bot, ProductEvent } from "@anviq/contracts";
-import { MODEL_KEY_FORMAT_ERROR, REPLY_QUOTE_MAX_LENGTH } from "@anviq/contracts";
+import {
+  CONNECTOR_AUTH_UNAVAILABLE,
+  MCP_OAUTH_CLIENT_REQUIRED,
+  MODEL_KEY_FORMAT_ERROR,
+  REPLY_QUOTE_MAX_LENGTH,
+} from "@anviq/contracts";
 import { openScreenCapability } from "@anviq/core/node/screen-capability";
 import type { PrismaClient } from "@anviq/db";
-import { AnswerTooLongError, runProviderTransaction } from "@anviq/db";
+import {
+  AnswerTooLongError,
+  configureProviderTransactionPool,
+  runProviderTransaction,
+} from "@anviq/db";
 import { createLogger, createTestSink, installLogger } from "@anviq/logging";
+import type { InferRouterInitialContext } from "@orpc/server";
 import { createRouterClient } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -39,6 +50,7 @@ import {
   HEARTBEAT_MS,
   SESSION_RECHECK_MS,
 } from "./router.js";
+import { providerScopeKey } from "./routes/connections.js";
 
 const withRoleDeps = (deps: RouterDeps) => {
   withModelRoles(deps.prisma);
@@ -48,10 +60,25 @@ const createRouter = (deps: RouterDeps) => createRouterWith(withRoleDeps(deps));
 const enqueueBotIntroRun = (deps: RouterDeps, ...rest: [Actor, Bot]) =>
   enqueueBotIntroRunWith(withRoleDeps(deps), ...rest);
 
+type RouterHandler = RPCHandler<InferRouterInitialContext<ReturnType<typeof createRouter>>>;
+
+// Every path these tests call is routed, so a missing response is a broken test.
+async function handle(handler: RouterHandler, ...args: Parameters<RouterHandler["handle"]>) {
+  const { response } = await handler.handle(...args);
+  if (!response) throw new Error("no response");
+  return response;
+}
+
 describe("account preferences", () => {
   function preferencesDeps(avatarStyle: string, timezone: string | null = null) {
     const update = vi.fn().mockResolvedValue({});
-    const user = { email: "user@anviq.test", name: "Test User", avatarStyle, timezone };
+    const user = {
+      email: "user@anviq.test",
+      name: "Test User",
+      avatarStyle,
+      timezone,
+      secrets: [],
+    };
     const updateMany = vi.fn(
       async ({ where, data }: { where: { timezone: null }; data: { timezone: string } }) => {
         if (user.timezone !== where.timezone) return { count: 0 };
@@ -263,7 +290,8 @@ describe("account preferences", () => {
     deps.remoteConnectors = { fetch } as RouterDeps["remoteConnectors"];
     const handler = new RPCHandler(createRouter(deps));
     const request = async (usePublicCatalog?: boolean) =>
-      handler.handle(
+      handle(
+        handler,
         new Request("http://127.0.0.1/rpc/capabilities/catalogSearch", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -271,7 +299,7 @@ describe("account preferences", () => {
         }),
         { prefix: "/rpc", context: { actor } },
       );
-    const { response } = await request();
+    const response = await request();
     await expect(response.json()).resolves.toEqual({ json: { enabled: false, results: [] } });
     expect(fetch).not.toHaveBeenCalled();
     await request(true);
@@ -281,7 +309,8 @@ describe("account preferences", () => {
   it("accepts an avatar style from an older app without storing it", async () => {
     const { update, actor, handler } = preferencesDeps("organic");
 
-    const { response } = await handler.handle(
+    const response = await handle(
+      handler,
       new Request("http://127.0.0.1/rpc/preferences/update", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -300,7 +329,8 @@ describe("account preferences", () => {
   it("rejects avatar styles outside robot|organic", async () => {
     const { update, actor, handler } = preferencesDeps("robot");
 
-    const { response } = await handler.handle(
+    const response = await handle(
+      handler,
       new Request("http://127.0.0.1/rpc/preferences/update", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -317,7 +347,8 @@ describe("account preferences", () => {
     { handler, actor }: ReturnType<typeof preferencesDeps>,
     json: unknown,
   ) {
-    const { response } = await handler.handle(
+    const response = await handle(
+      handler,
       new Request("http://127.0.0.1/rpc/preferences/update", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -325,8 +356,7 @@ describe("account preferences", () => {
       }),
       { prefix: "/rpc", context: { actor } },
     );
-    if (!response) throw new Error("no response");
-    return response;
+    return response!;
   }
 
   it("persists an IANA timezone without touching the avatar style", async () => {
@@ -338,6 +368,18 @@ describe("account preferences", () => {
     expect(setup.update).toHaveBeenCalledWith({
       where: { id: "user-1" },
       data: { timezone: "Pacific/Auckland" },
+    });
+  });
+
+  it("saves the app language emails are written in", async () => {
+    const setup = preferencesDeps("organic");
+
+    const response = await updatePreferences(setup, { locale: "pt-BR" });
+
+    expect(response.status).toBe(200);
+    expect(setup.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { locale: "pt-BR" },
     });
   });
 
@@ -372,7 +414,8 @@ describe("account preferences", () => {
 
   it("rejects adopting an unknown timezone", async () => {
     const setup = preferencesDeps("robot");
-    const { response } = await setup.handler.handle(
+    const response = await handle(
+      setup.handler,
       new Request("http://127.0.0.1/rpc/preferences/adoptTimezone", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -390,7 +433,8 @@ describe("account preferences", () => {
     async (style) => {
       const { actor, handler } = preferencesDeps(style);
 
-      const { response } = await handler.handle(
+      const response = await handle(
+        handler,
         new Request("http://127.0.0.1/rpc/me", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -424,6 +468,7 @@ describe("billing", () => {
           name: "Test User",
           avatarStyle: "robot",
           signupSurvey,
+          secrets: [],
         }),
       },
       signupSurvey: { upsert: upsertSignupSurvey },
@@ -558,6 +603,7 @@ describe("model setup gate", () => {
   function modelGateDeps(options: {
     agentRuntime: string;
     maxUploadSizeBytes?: number;
+    maxAttachmentsPerMessage?: number;
     deploymentModelConfigured?: boolean;
     deploymentModelHostCredentials?: boolean;
     deploymentModelCredentialCipher?: string;
@@ -568,7 +614,15 @@ describe("model setup gate", () => {
           email: "user@anviq.test",
           name: "Test User",
           avatarStyle: "robot",
+          secrets: [],
         }),
+      },
+      // A bot that follows the main model.
+      bot: {
+        findFirst: vi.fn().mockResolvedValue({ id: "bot-1", thread: { id: "thread-1" } }),
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ modelProvider: null, modelId: null, thinkingLevel: null }]),
       },
       userModelPreference: { findFirst: vi.fn().mockResolvedValue(null) },
       deploymentSettings: {
@@ -586,6 +640,7 @@ describe("model setup gate", () => {
       env: {
         agentRuntime: options.agentRuntime,
         maxUploadSizeBytes: options.maxUploadSizeBytes,
+        maxAttachmentsPerMessage: options.maxAttachmentsPerMessage,
         defaultProvider: "openrouter",
         defaultModel: "test-model",
         deploymentModelConfigured: options.deploymentModelConfigured,
@@ -605,8 +660,9 @@ describe("model setup gate", () => {
     return { actor, handler: new RPCHandler(createRouter(deps)) };
   }
 
-  async function call(handler: RPCHandler<never>, actor: Actor, path: string, body: unknown) {
-    const { response } = await handler.handle(
+  async function call(handler: RouterHandler, actor: Actor, path: string, body: unknown) {
+    const response = await handle(
+      handler,
       new Request(`http://127.0.0.1/rpc/${path}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -614,8 +670,23 @@ describe("model setup gate", () => {
       }),
       { prefix: "/rpc", context: { actor } },
     );
-    return response;
+    return response!;
   }
+
+  it.each([undefined, 1, 8, 100])(
+    "advertises the effective attachment count (%s)",
+    async (maxAttachmentsPerMessage) => {
+      const { actor, handler } = modelGateDeps({
+        agentRuntime: "scripted",
+        maxAttachmentsPerMessage,
+      });
+      const response = await call(handler, actor, "me", null);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        json: { maxAttachmentsPerMessage: maxAttachmentsPerMessage ?? 4 },
+      });
+    },
+  );
 
   it.each([undefined, 25 * 1024 * 1024])(
     "advertises the effective upload limit in me (%s)",
@@ -783,7 +854,8 @@ describe("thread answer delivery", () => {
     } satisfies Actor;
     const handler = new RPCHandler(createRouter(deps));
 
-    const { matched, response } = await handler.handle(
+    const response = await handle(
+      handler,
       new Request("http://127.0.0.1/rpc/threads/answer", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -800,7 +872,6 @@ describe("thread answer delivery", () => {
       { prefix: "/rpc", context: { actor } },
     );
 
-    expect(matched).toBe(true);
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ json: { ok: true } });
     expect(answerRunInput).toHaveBeenCalledWith(
@@ -850,7 +921,8 @@ describe("oversized one-time answer", () => {
       isDeploymentOwner: true,
     } satisfies Actor;
     const answer = `fake-code-${"x".repeat(16_400)}`;
-    const { response } = await new RPCHandler(createRouter(deps)).handle(
+    const response = await handle(
+      new RPCHandler(createRouter(deps)),
       new Request("http://127.0.0.1/rpc/threads/answer", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -903,7 +975,8 @@ describe("secret request dismissal", () => {
     } satisfies Actor;
     const handler = new RPCHandler(createRouter(deps));
     const send = (json: Record<string, unknown>) =>
-      handler.handle(
+      handle(
+        handler,
         new Request("https://api.example.test/rpc/threads/answer", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -918,7 +991,7 @@ describe("secret request dismissal", () => {
 
   it("passes a dismissal on as the signed-in user and wakes the run", async () => {
     const h = setup(true);
-    const { response } = await h.send({ answer: "", dismiss: true });
+    const response = await h.send({ answer: "", dismiss: true });
 
     expect(response.status).toBe(200);
     expect(h.answerRunInput).toHaveBeenCalledWith({
@@ -942,15 +1015,26 @@ describe("secret request dismissal", () => {
       { label: "ID number", value: "fake-id-123", hidden: false },
       { label: "Phone number", value: "+1 555 0100", hidden: true },
     ];
-    const { response } = await h.send({ answer: "", fields });
+    const response = await h.send({ answer: "", fields });
 
     expect(response.status).toBe(200);
     expect(h.answerRunInput).toHaveBeenCalledWith(expect.objectContaining({ answer: "", fields }));
   });
 
+  it("passes a login answered without saving it on", async () => {
+    const h = setup(true);
+    const fields = [{ label: "Password", value: "fake-password-1", hidden: true }];
+    const response = await h.send({ answer: "", fields, remember: false });
+
+    expect(response.status).toBe(200);
+    expect(h.answerRunInput).toHaveBeenCalledWith(
+      expect.objectContaining({ fields, remember: false }),
+    );
+  });
+
   it("reports a dismissal the card no longer accepts as a conflict", async () => {
     const h = setup(false);
-    const { response } = await h.send({ answer: "", dismiss: true });
+    const response = await h.send({ answer: "", dismiss: true });
 
     expect(response.status).toBe(409);
     expect(h.enqueue).not.toHaveBeenCalled();
@@ -974,9 +1058,19 @@ describe("secret request dismissal", () => {
     ["fields without hidden", { answer: "", fields: [{ label: "Code", value: "x" }] }],
     ["a dismissal during a call", { answer: "", clientNonce: "call:call-1:x", dismiss: true }],
     ["an empty answer", { answer: "" }],
+    ["not saving an answer that isn't a login", { answer: "123456", remember: false }],
+    ["not saving a dismissal", { answer: "", dismiss: true, remember: false }],
+    [
+      "remember true",
+      {
+        answer: "",
+        fields: [{ label: "Password", value: "x", hidden: true }],
+        remember: true,
+      },
+    ],
   ])("rejects %s before it reaches the run", async (_name, json) => {
     const h = setup(true);
-    const { response } = await h.send(json);
+    const response = await h.send(json);
 
     expect(response.status).toBe(400);
     expect(h.answerRunInput).not.toHaveBeenCalled();
@@ -987,7 +1081,7 @@ describe("secret request dismissal", () => {
     h.answerRunInput.mockRejectedValue(
       new Error("Credential cannot be used with this authentication method"),
     );
-    const { response } = await h.send({ answer: "example\nvalue" });
+    const response = await h.send({ answer: "example\nvalue" });
 
     expect(response.status).toBe(400);
     const body = JSON.stringify(await response.json());
@@ -999,7 +1093,7 @@ describe("secret request dismissal", () => {
   it("keeps unexpected answer failures as server errors", async () => {
     const h = setup(true);
     h.answerRunInput.mockRejectedValue(new Error("database unavailable"));
-    const { response } = await h.send({ answer: "Paris" });
+    const response = await h.send({ answer: "Paris" });
 
     expect(response.status).toBe(500);
   });
@@ -1142,9 +1236,11 @@ describe("MCP server deletion", () => {
     const deleteSecrets = vi.fn().mockResolvedValue({ count: 0 });
     const prisma = {
       mcpServer: {
+        findMany: vi.fn(async () => []),
         findFirst: vi.fn().mockResolvedValue({ id: "server-1", secretId: "old-secret" }),
         delete: deleteServer,
       },
+      mcpServerSpace: { findMany: vi.fn(async () => []) },
       secret: { deleteMany: deleteSecrets },
       message: { findMany: vi.fn().mockResolvedValue([]) },
       $transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) => run(prisma)),
@@ -1168,7 +1264,8 @@ describe("MCP server deletion", () => {
     } satisfies Actor;
     const handler = new RPCHandler(createRouter(deps));
 
-    const { matched, response } = await handler.handle(
+    const response = await handle(
+      handler,
       new Request("http://127.0.0.1/rpc/mcp/servers/remove", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1177,15 +1274,14 @@ describe("MCP server deletion", () => {
       { prefix: "/rpc", context: { actor } },
     );
 
-    expect(matched).toBe(true);
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ json: { ok: true } });
     expect(deleteServer).toHaveBeenCalledWith({ where: { id: "server-1" } });
     expect(deleteSecrets).toHaveBeenCalledWith({
       where: {
         id: "old-secret",
-        spaceId: "workspace-1",
         userId: "user-1",
+        OR: [{ spaceId: "workspace-1" }, { spaceId: null }],
       },
     });
   });
@@ -1224,6 +1320,7 @@ describe("MCP prepared credential updates", () => {
     ]);
     const prisma = {
       mcpServer: {
+        findMany: vi.fn(async () => []),
         findFirst: async () => ({ ...server }),
         update: async ({
           data,
@@ -1234,6 +1331,7 @@ describe("MCP prepared credential updates", () => {
           return { ...server };
         },
       },
+      mcpServerSpace: { findMany: vi.fn(async () => []) },
       secret: {
         findFirst: async ({ where }: { where: { id: string } }) => rows.get(where.id) ?? null,
         create: async ({ data }: { data: { id: string; ciphertext: string } }) => {
@@ -1253,7 +1351,7 @@ describe("MCP prepared credential updates", () => {
       userIntegrationProviderConfig: { count: async () => 0 },
       $executeRaw: async () => 1,
       $queryRaw: async () => [],
-      async $transaction(callback: (tx: typeof prisma) => Promise<unknown>) {
+      async $transaction(callback: (tx: unknown) => Promise<unknown>) {
         active = true;
         const start = clock;
         try {
@@ -1358,6 +1456,7 @@ describe("MCP pre-registered OAuth client", () => {
     }
     const prisma = {
       mcpServer: {
+        findMany: vi.fn(async () => []),
         findFirst: vi.fn(async () => (server ? { ...server } : null)),
         update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
           const { revision: _revision, ...rest } = data;
@@ -1376,6 +1475,7 @@ describe("MCP pre-registered OAuth client", () => {
         }),
       },
       mcpOAuthSession: { deleteMany: vi.fn(async () => ({ count: 0 })) },
+      mcpServerSpace: { findMany: vi.fn(async () => []) },
       secret: {
         create: vi.fn(async ({ data }: { data: { id: string; ciphertext: string } }) => {
           secretRows.set(data.id, data);
@@ -1516,12 +1616,12 @@ describe("MCP pre-registered OAuth client", () => {
 
   describe("stdio server with host-managed OAuth", () => {
     const stdio = {
-      transport: "stdio",
+      transport: "stdio" as const,
       slug: "google-drive",
       name: "Google Drive",
       command: "npx",
       args: ["google-drive-mcp"],
-    } as const;
+    };
     const oauthClient = {
       clientId: "client-1.apps.example.test",
       clientSecret: "client-secret",
@@ -1935,17 +2035,21 @@ describe("MCP loopback endpoints", () => {
     }));
     const prisma = {
       mcpServer: {
+        findMany: vi.fn(async () => []),
         create,
         findFirst: vi
           .fn()
           .mockResolvedValue({ id: "server-1", endpoint: LOOPBACK, secretId: null }),
       },
+      mcpServerSpace: { findMany: vi.fn(async () => []) },
       mcpOAuthSession: {
         count: vi.fn().mockResolvedValue(0),
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       secret: { findFirst: vi.fn() },
       deploymentSettings: { findUnique: vi.fn().mockResolvedValue({ ownerUserId: "owner-1" }) },
+      $executeRaw: vi.fn(async () => 0),
+      $queryRaw: vi.fn(async () => []),
       $transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) => run(prisma)),
     } as unknown as PrismaClient;
     const deps = {
@@ -1989,7 +2093,7 @@ describe("MCP loopback endpoints", () => {
 
   it("refuses a loopback endpoint from a user who is not the deployment owner", async () => {
     const { create, handler } = mcpDeps();
-    const { response } = await handler.handle(rpc("mcp/servers/create", createInput), {
+    const response = await handle(handler, rpc("mcp/servers/create", createInput), {
       prefix: "/rpc",
       context: { actor: actor(false) },
     });
@@ -2000,7 +2104,7 @@ describe("MCP loopback endpoints", () => {
 
   it("allows a loopback endpoint under explicit operator configuration", async () => {
     const { create, handler } = mcpDeps(true);
-    const { response } = await handler.handle(rpc("mcp/servers/create", createInput), {
+    const response = await handle(handler, rpc("mcp/servers/create", createInput), {
       prefix: "/rpc",
       context: { actor: actor(true) },
     });
@@ -2014,7 +2118,8 @@ describe("MCP loopback endpoints", () => {
     vi.stubGlobal("fetch", fetch);
     try {
       const { handler } = mcpDeps();
-      const { response } = await handler.handle(
+      const response = await handle(
+        handler,
         rpc("mcp/oauth/begin", {
           serverId: "server-1",
           redirectUri: "http://127.0.0.1:5173/mcp/oauth/callback",
@@ -2062,7 +2167,7 @@ describe("MCP server health", () => {
 
   function harness(options: { row?: Row | null; oauth?: McpOAuthSummary; probe?: unknown } = {}) {
     let server: Row | null = options.row === undefined ? baseRow() : options.row;
-    const probe = vi.fn(
+    const probe = vi.fn<(...args: unknown[]) => Promise<unknown>>(
       (options.probe as (() => Promise<unknown>) | undefined) ??
         (async () => {
           await recordHealth({ healthStatus: "ok", healthToolCount: 4 });
@@ -2076,11 +2181,16 @@ describe("MCP server health", () => {
       await recordHealth(data);
       return { count: server ? 1 : 0 };
     });
-    const matches = (where: Row) =>
+    const matches = (where: Row): boolean =>
       Boolean(server) &&
-      Object.entries(where).every(([key, value]) => (server as Row)[key] === value);
+      Object.entries(where).every(([key, value]) =>
+        key === "OR"
+          ? (value as Row[]).some((branch) => matches(branch))
+          : (server as Row)[key] === value,
+      );
     const prisma = {
       mcpServer: {
+        findMany: vi.fn(async () => []),
         findFirst: vi.fn(async ({ where }: { where: Row }) =>
           matches(where) ? { ...server } : null,
         ),
@@ -2095,10 +2205,15 @@ describe("MCP server health", () => {
         }),
         updateMany,
       },
+      mcpServerSpace: { findMany: vi.fn(async () => []) },
       secret: { findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
       user: {
         findUnique: vi.fn(async () => ({ email: "owner@anviq.test", emailVerified: true })),
-        findUniqueOrThrow: vi.fn(async () => ({ email: "owner@anviq.test", name: "Owner" })),
+        findUniqueOrThrow: vi.fn(async () => ({
+          email: "owner@anviq.test",
+          name: "Owner",
+          secrets: [],
+        })),
       },
       deploymentSettings: { findUnique: vi.fn().mockResolvedValue({ ownerUserId: "owner-1" }) },
       $executeRaw: vi.fn(async () => 1),
@@ -2160,12 +2275,12 @@ describe("MCP server health", () => {
   }
 
   const stdioInput = {
-    transport: "stdio",
+    transport: "stdio" as const,
     slug: "gmail",
     name: "Gmail",
     command: "npx",
     args: ["-y", "@klodr/gmail-mcp@2.0.2"],
-  } as const;
+  };
 
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -2256,6 +2371,7 @@ describe("MCP server health", () => {
     expect(listed?.health).toEqual({
       status: "error",
       message: "spawn npx ENOENT",
+      code: null,
       toolCount: null,
       checkedAt: "2026-10-21T10:00:00.000Z",
     });
@@ -2497,6 +2613,69 @@ describe("MCP server health", () => {
       expect(listed?.hasArgs).toBe(true);
     });
 
+    it("asks for a client ID when the server cannot register one", async () => {
+      const h = harness({
+        row: baseRow({ transport: "streamable_http", endpoint: "https://mcp.example.test/mcp" }),
+      });
+      Object.assign(h.deps, {
+        mcpOAuth: {
+          ...(h.deps.mcpOAuth as object),
+          begin: vi.fn().mockRejectedValue(new McpOAuthClientRequiredError(1)),
+        },
+      });
+      const client = createRouterClient(createRouter(h.deps), {
+        context: {
+          actor: {
+            spaceId: "workspace-1",
+            userId: "owner-1",
+            email: "owner@anviq.test",
+            isDeploymentOwner: true,
+          },
+        } as never,
+      });
+
+      await expect(
+        client.mcp.oauth.begin({
+          serverId: "server-1",
+          redirectUri: "http://127.0.0.1:5173/mcp/oauth/callback",
+        }),
+      ).rejects.toMatchObject({ code: MCP_OAUTH_CLIENT_REQUIRED });
+      expect(h.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: "server-1", revision: 1 } }),
+      );
+      (h.deps.prisma.mcpServer as unknown as { findMany: unknown }).findMany = vi.fn(async () => [
+        h.row(),
+      ]);
+      const [listed] = await client.mcp.servers.list();
+      expect(listed?.health).toMatchObject({ status: "error", code: MCP_OAUTH_CLIENT_REQUIRED });
+    });
+
+    it("uses the registered web callback when a native client omits the redirect", async () => {
+      const h = harness({
+        row: baseRow({ transport: "streamable_http", endpoint: "https://mcp.example.test/mcp" }),
+      });
+      const begin = vi.fn(async () => ({ status: "already_connected" as const }));
+      Object.assign(h.deps, { mcpOAuth: { ...(h.deps.mcpOAuth as object), begin } });
+      const client = createRouterClient(createRouter(h.deps), {
+        context: {
+          actor: {
+            spaceId: "workspace-1",
+            userId: "owner-1",
+            email: "owner@anviq.test",
+            isDeploymentOwner: true,
+          },
+        } as never,
+      });
+
+      await expect(client.mcp.oauth.begin({ serverId: "server-1" })).resolves.toEqual({
+        status: "already_connected",
+      });
+      expect(begin).toHaveBeenCalledWith(
+        expect.objectContaining({
+          redirectUri: new URL("/mcp/oauth/callback", h.deps.env.webOrigin).toString(),
+        }),
+      );
+    });
     it("probes the server once its OAuth session completes", async () => {
       const h = harness({ row: baseRow() });
       const complete = vi.fn(async () => undefined);
@@ -2590,7 +2769,7 @@ describe("private API connectors", () => {
     ["every user under the instance flag", false, true],
   ])("lets %s install a loopback API connector", async (_label, owner, flag) => {
     const { create, handler } = privateDeps(flag);
-    const { response } = await handler.handle(rpc("capabilities/install", installInput), {
+    const response = await handle(handler, rpc("capabilities/install", installInput), {
       prefix: "/rpc",
       context: { actor: actor(owner) },
     });
@@ -2601,7 +2780,7 @@ describe("private API connectors", () => {
 
   it("refuses a loopback API connector from a user who is not the deployment owner", async () => {
     const { create, handler } = privateDeps();
-    const { response } = await handler.handle(rpc("capabilities/install", installInput), {
+    const response = await handle(handler, rpc("capabilities/install", installInput), {
       prefix: "/rpc",
       context: { actor: actor(false) },
     });
@@ -2660,7 +2839,8 @@ describe("connections.begin", () => {
     } satisfies Actor;
     const handler = new RPCHandler(createRouter(deps));
 
-    const { matched, response } = await handler.handle(
+    const response = await handle(
+      handler,
       new Request("http://127.0.0.1/rpc/connections/begin", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -2675,7 +2855,6 @@ describe("connections.begin", () => {
       { prefix: "/rpc", context: { actor } },
     );
 
-    expect(matched).toBe(true);
     expect(response.status).toBe(200);
     expect(begin).toHaveBeenCalledWith(
       { provider: "gmail", redirectUrl: "http://127.0.0.1:5173/integrations/callback" },
@@ -2706,8 +2885,9 @@ describe("connections.begin", () => {
     let releaseSlot = () => {};
     let holder: Promise<void> = Promise.resolve();
     const begin = vi.fn(async () => {
-      // Another provider call takes the slot while this one talks to the provider.
+      // Another provider call takes this scope's slot while this one talks to the provider.
       holder = runProviderTransaction(
+        providerScopeKey({ spaceId: "workspace-1", userId: "user-1" }, "composio", "gmail"),
         () =>
           new Promise<void>((resolve) => {
             releaseSlot = resolve;
@@ -2745,7 +2925,8 @@ describe("connections.begin", () => {
       } as unknown as RouterDeps),
     );
     try {
-      const handled = handler.handle(
+      const handled = handle(
+        handler,
         new Request("http://127.0.0.1/rpc/connections/begin", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -2766,7 +2947,7 @@ describe("connections.begin", () => {
         },
       );
       await vi.advanceTimersByTimeAsync(60_000);
-      const { response } = await handled;
+      const response = await handled;
 
       expect(response.status).not.toBe(200);
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
@@ -2780,6 +2961,70 @@ describe("connections.begin", () => {
       await holder;
       vi.useRealTimers();
     }
+  });
+
+  it("answers with the connector auth code when the app has no usable sign-in", async () => {
+    const begin = vi.fn().mockRejectedValue(
+      new ConnectorAuthUnavailableError({
+        cause: '400 {"error":{"slug":"ToolRouterV2_NoManagedAuth"}}',
+      }),
+    );
+    const rootUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      connection: {
+        findMany: vi.fn().mockResolvedValue([]),
+        create: vi.fn().mockResolvedValue({ id: "conn-1", status: "pending" }),
+      },
+    };
+    const prisma = {
+      connection: { updateMany: rootUpdateMany },
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(tx)),
+    } as unknown as PrismaClient;
+    const handler = new RPCHandler(
+      createRouter({
+        prisma,
+        connectors: { managed: vi.fn(() => ({ begin })) },
+        env: {
+          defaultProvider: "fake",
+          defaultModel: "fake-model",
+          webOrigin: "http://127.0.0.1:5173",
+          screenProxySecret: "fake-test-secret",
+          sandboxProvider: "fake",
+        },
+        dataDir: "/tmp/anviq-router-test",
+      } as unknown as RouterDeps),
+    );
+
+    const response = await handle(
+      handler,
+      new Request("http://127.0.0.1/rpc/connections/begin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          json: { connectorId: "composio", provider: "twitter", displayName: "Twitter" },
+        }),
+      }),
+      {
+        prefix: "/rpc",
+        context: {
+          actor: {
+            spaceId: "workspace-1",
+            userId: "user-1",
+            email: "user@anviq.test",
+            isDeploymentOwner: true,
+          },
+        },
+      },
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body).toMatchObject({ json: { code: CONNECTOR_AUTH_UNAVAILABLE } });
+    expect(JSON.stringify(body)).not.toContain("ToolRouterV2_NoManagedAuth");
+    expect(rootUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "error" } }),
+    );
   });
 });
 
@@ -2880,7 +3125,8 @@ describe("connections.complete", () => {
           },
         } as unknown as RouterDeps),
       );
-      const { response } = await handler.handle(
+      const response = await handle(
+        handler,
         new Request(`http://127.0.0.1/rpc/connections/${operation}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -2983,7 +3229,8 @@ describe("connections.complete", () => {
     } satisfies Actor;
     const handler = new RPCHandler(createRouter(deps));
 
-    const { matched, response } = await handler.handle(
+    const response = await handle(
+      handler,
       new Request("http://127.0.0.1/rpc/connections/complete", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -2997,7 +3244,6 @@ describe("connections.complete", () => {
       { prefix: "/rpc", context: { actor } },
     );
 
-    expect(matched).toBe(true);
     expect(response.status).toBe(200);
     expect(complete).toHaveBeenCalledWith(
       { state: "gmail-state", code: "123456" },
@@ -3046,6 +3292,7 @@ describe("connections.complete", () => {
       const holder =
         held === "slot"
           ? runProviderTransaction(
+              providerScopeKey({ spaceId: "workspace-1", userId: "user-1" }, "composio", "gmail"),
               () =>
                 new Promise<void>((resolve) => {
                   releaseSlot = resolve;
@@ -3054,7 +3301,8 @@ describe("connections.complete", () => {
             )
           : Promise.resolve();
       try {
-        const handled = handler.handle(
+        const handled = handle(
+          handler,
           new Request("http://127.0.0.1/rpc/connections/complete", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -3073,7 +3321,7 @@ describe("connections.complete", () => {
           },
         );
         await vi.advanceTimersByTimeAsync(2_000);
-        const { response } = await handled;
+        const response = await handled;
 
         expect(response.status).toBe(200);
         expect(await response.json()).toMatchObject({ json: { id: "conn-1", status: "pending" } });
@@ -3086,6 +3334,123 @@ describe("connections.complete", () => {
       }
     },
   );
+
+  it("completes another space's integration while a slow provider call holds its own scope", async () => {
+    vi.useFakeTimers();
+    // The API sizes the gate from its pool when it builds the app; the default pool is 4.
+    configureProviderTransactionPool(4);
+    const slowRow = {
+      id: "conn-slow",
+      spaceId: "space-1",
+      userId: "user-1",
+      connectorId: "composio",
+      provider: "gmail",
+      displayName: "Gmail",
+      providerRef: "gmail-state",
+      status: "pending",
+      createdAt: new Date("2026-08-26T00:00:00.000Z"),
+    };
+    const otherRow = {
+      id: "conn-other",
+      spaceId: "space-2",
+      userId: "user-2",
+      connectorId: "pipedream",
+      provider: "slack",
+      displayName: "Slack",
+      providerRef: "slack-account",
+      status: "pending",
+      createdAt: new Date("2026-08-26T00:00:00.000Z"),
+    };
+    let releaseSlowProvider = () => {};
+    const slowProvider = new Promise<boolean>((resolve) => {
+      releaseSlowProvider = () => resolve(true);
+    });
+    const otherReady = vi.fn().mockResolvedValue(true);
+    const connectors = {
+      managed: vi.fn((id: string) =>
+        id === "composio"
+          ? { connectionReady: () => slowProvider }
+          : { connectionReady: otherReady },
+      ),
+    };
+    // Each transaction reads its row, probes whether the providerRef is taken, then
+    // re-reads after the update; dispatch on the probe's providerRef and per-space reads.
+    const readsBySpace = new Map<string, number>();
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ locked: true }]),
+      connection: {
+        findFirst: vi.fn(
+          async ({ where }: { where: { spaceId?: string; providerRef?: string } }) => {
+            if (where.providerRef) return null;
+            const reads = (readsBySpace.get(where.spaceId ?? "") ?? 0) + 1;
+            readsBySpace.set(where.spaceId ?? "", reads);
+            const row = where.spaceId === "space-1" ? slowRow : otherRow;
+            return reads === 1 ? { ...row } : { ...row, status: "connected" };
+          },
+        ),
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = {
+      connection: {
+        findFirst: vi.fn(async ({ where }: { where: { id: string } }) =>
+          where.id === slowRow.id ? { ...slowRow } : { ...otherRow },
+        ),
+      },
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(tx)),
+    } as unknown as PrismaClient;
+    const handler = new RPCHandler(
+      createRouter({
+        prisma,
+        connectors,
+        env: {
+          defaultProvider: "fake",
+          defaultModel: "fake-model",
+          webOrigin: "http://127.0.0.1:5173",
+          screenProxySecret: "fake-test-secret",
+          sandboxProvider: "fake",
+        },
+        dataDir: "/tmp/anviq-router-test",
+      } as unknown as RouterDeps),
+    );
+    const completeRequest = (connectionId: string, spaceId: string, userId: string) =>
+      handle(
+        handler,
+        new Request("http://127.0.0.1/rpc/connections/complete", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ json: { connectionId } }),
+        }),
+        {
+          prefix: "/rpc",
+          context: {
+            actor: { spaceId, userId, email: `${userId}@anviq.test`, isDeploymentOwner: true },
+          },
+        },
+      );
+    try {
+      // A hanging provider call inside space-1's gated transaction pins its scope.
+      const slowHandled = completeRequest(slowRow.id, "space-1", "user-1");
+      await vi.advanceTimersByTimeAsync(0);
+      const otherHandled = completeRequest(otherRow.id, "space-2", "user-2");
+      await vi.advanceTimersByTimeAsync(2_000);
+      const response = await otherHandled;
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        json: { id: "conn-other", status: "connected" },
+      });
+      expect(otherReady).toHaveBeenCalledWith(expect.anything(), "slack");
+
+      releaseSlowProvider();
+      const slowResponse = await slowHandled;
+      expect(slowResponse.status).toBe(200);
+    } finally {
+      releaseSlowProvider();
+      vi.useRealTimers();
+    }
+  });
 
   afterEach(() => {
     installLogger(createLogger({ service: "anviq-api", level: "off", sinks: [] }));
@@ -3160,7 +3525,8 @@ describe("connections.complete", () => {
       return call("revoke", row.id, signal);
     }
     async function call(operation: string, connectionId: string, signal?: AbortSignal) {
-      const { response } = await handler.handle(
+      const response = await handle(
+        handler,
         new Request(`http://127.0.0.1/rpc/connections/${operation}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -3366,6 +3732,7 @@ describe("updater owner gate", () => {
           email: "user@anviq.test",
           name: "Test User",
           avatarStyle: "robot",
+          secrets: [],
         }),
       },
       userModelPreference: { findFirst: vi.fn().mockResolvedValue(null) },
@@ -3395,7 +3762,8 @@ describe("updater owner gate", () => {
       isDeploymentOwner: false,
     } satisfies Actor;
 
-    const { response } = await handler.handle(
+    const response = await handle(
+      handler,
       new Request("http://127.0.0.1/rpc/updater/status", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -3416,7 +3784,8 @@ describe("updater owner gate", () => {
       isDeploymentOwner: true,
     } satisfies Actor;
 
-    const { response } = await handler.handle(
+    const response = await handle(
+      handler,
       new Request("http://127.0.0.1/rpc/updater/status", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -3437,7 +3806,8 @@ describe("updater owner gate", () => {
       isDeploymentOwner: true,
     } satisfies Actor;
 
-    const { response } = await handler.handle(
+    const response = await handle(
+      handler,
       new Request("http://127.0.0.1/rpc/updater/apply", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -3476,7 +3846,7 @@ describe("computer screen url", () => {
     connectScreen: () => Promise<unknown>,
     updateMany = vi.fn().mockResolvedValue({ count: 1 }),
   ) => {
-    const endRun = vi.fn().mockResolvedValue({ count: 1 });
+    const endRun = vi.fn().mockResolvedValue(1);
     const prisma = {
       bot: {
         findFirst: vi.fn().mockResolvedValue({
@@ -3487,7 +3857,7 @@ describe("computer screen url", () => {
         }),
       },
       computer: { updateMany },
-      computerRun: { updateMany: endRun },
+      $executeRaw: endRun,
       computerExecutionLease: { findUnique: vi.fn().mockResolvedValue(null) },
     } as unknown as PrismaClient;
     const deps = {
@@ -3504,7 +3874,8 @@ describe("computer screen url", () => {
       dataDir: "/tmp/anviq-router-test",
     } as unknown as RouterDeps;
     const handler = new RPCHandler(createRouter(deps));
-    const { response } = await handler.handle(
+    const response = await handle(
+      handler,
       new Request("http://127.0.0.1/rpc/computer/screenUrl", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -3559,9 +3930,7 @@ describe("computer screen url", () => {
       where: { id: "computer-1", providerRef: "sandbox-ref-1" },
       data: { state: "stopped", providerRef: null },
     });
-    expect(endRun).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ endReason: "gone" }) }),
-    );
+    expect(endRun.mock.calls.map(([, , reason]) => reason)).toEqual(["gone"]);
   });
 
   it("keeps a transport blip an error and leaves the row alone", async () => {
@@ -3601,7 +3970,8 @@ describe("computer terminal and file transfer", () => {
   const controlled = {
     controlHolder: "user",
     controlLeaseId: "lease-1",
-    controlLeaseExpiresAt: new Date(Date.now() + 60_000),
+    // Fixed far future: a lease relative to module load expires before a slow suite reaches it.
+    controlLeaseExpiresAt: new Date("2999-01-01T00:00:00Z"),
     controlBotId: "bot-1",
   };
 
@@ -3657,7 +4027,8 @@ describe("computer terminal and file transfer", () => {
     } as unknown as RouterDeps;
     const handler = new RPCHandler(createRouter(deps));
     const call = async (procedure: string, json: Record<string, unknown>) => {
-      const { response } = await handler.handle(
+      const response = await handle(
+        handler,
         new Request(`http://127.0.0.1/rpc/computer/${procedure}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -3847,6 +4218,28 @@ describe("computer terminal and file transfer", () => {
     expect(sandbox.writeFile).not.toHaveBeenCalled();
   });
 
+  it("answers 400 when a running computer's file is too large or not text to preview", async () => {
+    const large = setup();
+    large.sandbox.readFile.mockRejectedValueOnce(new Error("computer file exceeds 2097152 bytes"));
+    await expect(large.call("readFile", { path: "big.log" })).resolves.toMatchObject({
+      status: 400,
+      body: { json: { message: "file is too large to preview" } },
+    });
+
+    const binary = setup();
+    binary.sandbox.readFile.mockResolvedValueOnce(new Uint8Array([0xff, 0xfe, 0x00]));
+    await expect(binary.call("readFile", { path: "image.bin" })).resolves.toMatchObject({
+      status: 400,
+      body: { json: { message: "file is not a text file" } },
+    });
+
+    const text = setup();
+    await expect(text.call("readFile", { path: "notes.txt" })).resolves.toEqual({
+      status: 200,
+      body: { json: { path: "notes.txt", content: "hello" } },
+    });
+  });
+
   it("downloads bytes from a running computer", async () => {
     const { sandbox, call } = setup();
     await expect(call("downloadFile", { path: "notes.txt" })).resolves.toEqual({
@@ -3892,7 +4285,7 @@ describe("integration setup", () => {
         },
       },
     );
-    return response;
+    return response!;
   };
   const baseDeps = (user: typeof admin | null, extra: Record<string, unknown> = {}) => ({
     prisma: { user: { findUnique: vi.fn(async () => user) } },
@@ -4150,6 +4543,22 @@ describe("OpenAI-compatible model probes", () => {
     expect(JSON.stringify(response)).not.toContain("fake-session-secret");
   });
 
+  it("sends a saved key with Anthropic headers for the Anthropic Messages protocol", async () => {
+    const { client, fetch, load } = fixture();
+    load.mockResolvedValue(
+      JSON.stringify({ kind: "openai_compatible", baseUrl, apiKey: "fake-saved-key" }),
+    );
+    const response = await client.models.probeOpenAiCompatible({
+      baseUrl,
+      apiProtocol: "anthropic-messages",
+    });
+    const headers = new Headers(fetch.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("x-api-key")).toBe("fake-saved-key");
+    expect(headers.get("anthropic-version")).toBe("2023-06-01");
+    expect(headers.get("authorization")).toBeNull();
+    expect(response).toEqual({ models: ["test-model"] });
+  });
+
   it("never uses another user's credential id for probe secrets", async () => {
     const { client, fetch, credentials, load } = fixture();
     credentials.push({
@@ -4392,12 +4801,13 @@ describe("model credential persistence", () => {
   }
 
   async function call(
-    handler: RPCHandler<never>,
+    handler: RouterHandler,
     path: string,
     body: unknown,
     as: Actor = actor,
   ): Promise<Response> {
-    const { response } = await handler.handle(
+    const response = await handle(
+      handler,
       new Request(`http://127.0.0.1/rpc/${path}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -4405,7 +4815,7 @@ describe("model credential persistence", () => {
       }),
       { prefix: "/rpc", context: { actor: as } },
     );
-    return response;
+    return response!;
   }
 
   const privateConnect = {
@@ -4713,10 +5123,10 @@ describe("model credential persistence", () => {
 
   it.each(
     ["openrouter", "google", "deepseek"].flatMap((provider) =>
-      [401, 403, 503].map((status) => ({ provider, status })),
+      [401, 403].map((status) => ({ provider, status })),
     ),
   )(
-    "rejects an unverified $provider replacement ($status) without changing the saved connection",
+    "rejects a refused $provider replacement ($status) without changing the saved connection",
     async ({ provider, status }) => {
       const { upsert, deps, handler } = persistDeps();
       const saved = {
@@ -4743,10 +5153,7 @@ describe("model credential persistence", () => {
         await expect(response.json()).resolves.toMatchObject({
           json: {
             code: "BAD_REQUEST",
-            message:
-              status === 503
-                ? "Could not verify the API key. Try again."
-                : "API key was rejected by the provider.",
+            message: "API key was rejected by the provider.",
           },
         });
         expect(fetchImpl).toHaveBeenCalledOnce();
@@ -5121,16 +5528,15 @@ describe("model disconnect", () => {
     } as unknown as RouterDeps;
     const handler = new RPCHandler(createRouter(deps));
     const call = async (body: unknown) =>
-      (
-        await handler.handle(
-          new Request("http://127.0.0.1/rpc/models/disconnect", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ json: body }),
-          }),
-          { prefix: "/rpc", context: { actor } },
-        )
-      ).response;
+      handle(
+        handler,
+        new Request("http://127.0.0.1/rpc/models/disconnect", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ json: body }),
+        }),
+        { prefix: "/rpc", context: { actor } },
+      );
     return { tx, cancelProvider, call };
   }
 
@@ -5338,8 +5744,9 @@ describe("codex catalog auth", () => {
   });
   const apiKey = "sk-test-api-key-12345678";
 
-  async function call(handler: RPCHandler<never>, path: string, body: unknown) {
-    const { response } = await handler.handle(
+  async function call(handler: RouterHandler, path: string, body: unknown) {
+    const response = await handle(
+      handler,
       new Request(`http://127.0.0.1/rpc/${path}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -5347,7 +5754,7 @@ describe("codex catalog auth", () => {
       }),
       { prefix: "/rpc", context: { actor } },
     );
-    return response;
+    return response!;
   }
 
   function catalogDeps() {
@@ -5439,8 +5846,9 @@ describe("codex live catalog", () => {
     };
   }
 
-  async function call(handler: RPCHandler<never>, path: string, body: unknown) {
-    const { response } = await handler.handle(
+  async function call(handler: RouterHandler, path: string, body: unknown) {
+    const response = await handle(
+      handler,
       new Request(`http://127.0.0.1/rpc/${path}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -5448,10 +5856,10 @@ describe("codex live catalog", () => {
       }),
       { prefix: "/rpc", context: { actor } },
     );
-    return response;
+    return response!;
   }
 
-  async function listIds(handler: RPCHandler<never>): Promise<string[]> {
+  async function listIds(handler: RouterHandler): Promise<string[]> {
     const response = await call(handler, "models/list", null);
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
@@ -5944,8 +6352,9 @@ describe("model set default auth", () => {
   });
   const apiKey = "sk-test-api-key-12345678";
 
-  async function call(handler: RPCHandler<never>, path: string, body: unknown) {
-    const { response } = await handler.handle(
+  async function call(handler: RouterHandler, path: string, body: unknown) {
+    const response = await handle(
+      handler,
       new Request(`http://127.0.0.1/rpc/${path}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -5953,7 +6362,7 @@ describe("model set default auth", () => {
       }),
       { prefix: "/rpc", context: { actor } },
     );
-    return response;
+    return response!;
   }
 
   it("sets Spark from the API-key preference when a newer ChatGPT credential exists", async () => {
@@ -6329,8 +6738,9 @@ describe("bot model auth on save", () => {
   });
   const apiKey = "sk-test-api-key-12345678";
 
-  async function call(handler: RPCHandler<never>, path: string, body: unknown) {
-    const { response } = await handler.handle(
+  async function call(handler: RouterHandler, path: string, body: unknown) {
+    const response = await handle(
+      handler,
       new Request(`http://127.0.0.1/rpc/${path}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -6338,7 +6748,7 @@ describe("bot model auth on save", () => {
       }),
       { prefix: "/rpc", context: { actor } },
     );
-    return response;
+    return response!;
   }
 
   function storedBot(modelId: string) {
@@ -6452,6 +6862,15 @@ describe("bot model auth on save", () => {
     };
   }
 
+  it("persists the daily check-in preference through the bot update route", async () => {
+    const { botUpdate, handler } = saveDeps({ modelId: spark, preferences: () => null });
+    const response = await call(handler, "bots/update", { botId: "bot-1", dailyCheckIns: false });
+    expect(response.status).toBe(200);
+    expect(botUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ dailyCheckIns: false }) }),
+    );
+  });
+
   it("saves a rename while resending an existing Spark override", async () => {
     const { preferenceFindFirst, secretFindFirst, botUpdate, handler } = saveDeps({
       modelId: spark,
@@ -6543,6 +6962,29 @@ describe("bot model auth on save", () => {
       }),
     );
   });
+
+  it("undoes a chat-made settings change only while it still holds", async () => {
+    const { botUpdate, handler } = saveDeps({ modelId: luna, preferences: () => null });
+    const undo = { botId: "bot-1", autoSpeak: false, expectedSettings: { autoSpeak: true } };
+
+    expect((await call(handler, "bots/update", undo)).status).toBe(200);
+    expect(botUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "bot-1", autoSpeak: true },
+        data: expect.objectContaining({ autoSpeak: false }),
+      }),
+    );
+
+    botUpdate.mockRejectedValueOnce(Object.assign(new Error("No record"), { code: "P2025" }));
+    const changed = await call(handler, "bots/update", undo);
+    expect(changed.status).toBe(409);
+    await expect(changed.json()).resolves.toEqual({
+      json: expect.objectContaining({
+        code: "CONFLICT",
+        message: "Settings changed; review the current settings first.",
+      }),
+    });
+  });
 });
 
 describe("bot restore computer quota", () => {
@@ -6576,7 +7018,8 @@ describe("bot restore computer quota", () => {
       createRouter({ prisma, env: { sandboxProvider: "fake" } } as unknown as RouterDeps),
     );
     const call = async () =>
-      handler.handle(
+      handle(
+        handler,
         new Request("http://127.0.0.1/rpc/bots/restore", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -6600,7 +7043,7 @@ describe("bot restore computer quota", () => {
   it("archives, creates, then restores is refused when the restore would exceed the cap", async () => {
     process.env.SANDBOX_MAX_COMPUTERS_PER_USER = "1";
     const { prisma, call } = fixture({ archivedAt: new Date() }, 1);
-    const { response } = await call();
+    const response = await call();
     expect(response.status).toBe(400);
     expect(prisma.bot.update).not.toHaveBeenCalled();
   });
@@ -6608,7 +7051,7 @@ describe("bot restore computer quota", () => {
   it("restores normally when the user is below the cap or the computer is already live", async () => {
     process.env.SANDBOX_MAX_COMPUTERS_PER_USER = "1";
     const { prisma, call } = fixture({ archivedAt: new Date() }, 0);
-    const { response } = await call();
+    const response = await call();
     expect(response.status).toBe(200);
     expect(prisma.bot.update).toHaveBeenCalledWith({
       where: { id: "bot-archived" },
@@ -6618,7 +7061,7 @@ describe("bot restore computer quota", () => {
 
   it("does not enforce anything when the cap is unset", async () => {
     const { prisma, call } = fixture({ archivedAt: new Date() }, 99);
-    const { response } = await call();
+    const response = await call();
     expect(response.status).toBe(200);
     expect(prisma.bot.update).toHaveBeenCalledOnce();
   });
@@ -6644,7 +7087,8 @@ describe("group restore with archived bots", () => {
       createRouter({ prisma, env: { sandboxProvider: "fake" } } as unknown as RouterDeps),
     );
     const call = async () =>
-      handler.handle(
+      handle(
+        handler,
         new Request("http://anviq.test/rpc/groups/restore", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -6670,7 +7114,7 @@ describe("group restore with archived bots", () => {
       { id: "bot-a", computerId: "computer-a" },
       { id: "bot-b", computerId: null },
     ]);
-    const { response } = await call();
+    const response = await call();
     expect(response.status).toBe(200);
     expect(tx.bot.update.mock.calls).toEqual([
       [{ where: { id: "bot-a" }, data: { archivedAt: null } }],
@@ -6688,7 +7132,7 @@ describe("group restore with archived bots", () => {
   it("refuses with the quota error and restores nothing when a bot's computer has no room", async () => {
     process.env.SANDBOX_MAX_COMPUTERS_PER_USER = "1";
     const { tx, call } = fixture([{ id: "bot-a", computerId: "computer-a" }], 1);
-    const { response } = await call();
+    const response = await call();
     expect(response.status).toBe(400);
     expect(tx.bot.update).not.toHaveBeenCalled();
     expect(tx.chatGroup.update).not.toHaveBeenCalled();
@@ -6893,7 +7337,7 @@ describe("routines.update", () => {
     archivedBeforeWrite = false,
     model: Record<string, unknown> = {},
   ) {
-    const savedRoutine = { ...routine, ...model };
+    const savedRoutine: Record<string, unknown> = { ...routine, ...model };
     const update = vi.fn(
       async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
         if (archivedBeforeWrite) throw Object.assign(new Error("not found"), { code: "P2025" });
@@ -6906,6 +7350,7 @@ describe("routines.update", () => {
       },
     );
     const enqueue = vi.fn(async () => undefined);
+    const cancel = vi.fn(async () => undefined);
     const prisma = {
       secret: { findFirst: vi.fn(async () => null) },
       userModelPreference: {
@@ -6939,11 +7384,12 @@ describe("routines.update", () => {
         prisma,
         env: { sandboxProvider: "fake" },
         events: { append: vi.fn(async () => undefined) },
-        jobs: { enqueue, cancel: vi.fn(async () => undefined) },
+        jobs: { enqueue, cancel },
       } as unknown as RouterDeps),
     );
     const call = (patch: Record<string, unknown> = {}) =>
-      handler.handle(
+      handle(
+        handler,
         new Request("http://127.0.0.1/rpc/routines/update", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -6958,12 +7404,12 @@ describe("routines.update", () => {
         }),
         { prefix: "/rpc", context: { actor } },
       );
-    return { update, enqueue, call, findFirst: prisma.routine.findFirst };
+    return { update, enqueue, cancel, call, findFirst: prisma.routine.findFirst };
   }
 
   it("refuses to re-arm a routine on an archived bot without writing", async () => {
     const { update, enqueue, call } = fixture(true);
-    const { response } = await call();
+    const response = await call();
     expect(response.status).toBe(404);
     expect(update).not.toHaveBeenCalled();
     expect(enqueue).not.toHaveBeenCalled();
@@ -6971,11 +7417,11 @@ describe("routines.update", () => {
 
   it("re-arms a routine on an active bot", async () => {
     const { update, enqueue, call } = fixture(false);
-    const { response } = await call();
+    const response = await call();
     expect(response.status).toBe(200);
     expect(update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "routine-1", bot: { archivedAt: null }, nextRunAt: null },
+        where: { id: "routine-1", bot: { archivedAt: null }, nextRunAt: null, active: false },
         data: expect.objectContaining({ active: true }),
       }),
     );
@@ -6985,7 +7431,7 @@ describe("routines.update", () => {
   it("does not re-arm when the bot is archived between the read and the write", async () => {
     const { enqueue, call, findFirst } = fixture(false, true);
     findFirst.mockResolvedValueOnce(routine).mockResolvedValueOnce(null);
-    const { response } = await call();
+    const response = await call();
     expect(response.status).toBe(404);
     expect(enqueue).not.toHaveBeenCalled();
   });
@@ -6998,9 +7444,7 @@ describe("routines.update", () => {
 
   it("leaves model columns out of unrelated updates", async () => {
     const { call, update } = fixture(false, false, ownModel);
-    expect(
-      (await call({ name: "Renamed", active: undefined, runAt: undefined })).response.status,
-    ).toBe(200);
+    expect((await call({ name: "Renamed", active: undefined, runAt: undefined })).status).toBe(200);
     expect(update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "routine-1", bot: { archivedAt: null } } }),
     );
@@ -7021,7 +7465,7 @@ describe("routines.update", () => {
         }
         throw new Error("Concurrent model change was not guarded");
       });
-      expect((await call({ thinkingLevel: "low" })).response.status).toBe(409);
+      expect((await call({ thinkingLevel: "low" })).status).toBe(409);
       expect(enqueue).not.toHaveBeenCalled();
     },
   );
@@ -7029,12 +7473,12 @@ describe("routines.update", () => {
   it("returns not found if a model update races with a parent archive", async () => {
     const { call, findFirst } = fixture(false, true, ownModel);
     findFirst.mockResolvedValueOnce({ ...routine, ...ownModel }).mockResolvedValueOnce(null);
-    expect((await call({ thinkingLevel: "low" })).response.status).toBe(404);
+    expect((await call({ thinkingLevel: "low" })).status).toBe(404);
   });
 
   it("merges a model-id-only patch with the saved provider and clears old thinking", async () => {
     const { call, update } = fixture(false, false, ownModel);
-    expect((await call({ modelId: "new-model" })).response.status).toBe(200);
+    expect((await call({ modelId: "new-model" })).status).toBe(200);
     expect(update.mock.calls[0]![0].data).toMatchObject({
       modelProvider: "openai-compatible",
       modelId: "new-model",
@@ -7044,7 +7488,7 @@ describe("routines.update", () => {
 
   it("merges a provider-only patch with the saved model and clears old thinking", async () => {
     const { call, update } = fixture(false, false, { ...ownModel, modelProvider: "openrouter" });
-    expect((await call({ modelProvider: "openai-compatible" })).response.status).toBe(200);
+    expect((await call({ modelProvider: "openai-compatible" })).status).toBe(200);
     expect(update.mock.calls[0]![0].data).toMatchObject({
       modelProvider: "openai-compatible",
       modelId: "old-model",
@@ -7058,7 +7502,7 @@ describe("routines.update", () => {
       modelId: "gpt-4o",
       thinkingLevel: "high",
     });
-    expect((await call({ modelProvider: "azure", modelId: "gpt-4o" })).response.status).toBe(200);
+    expect((await call({ modelProvider: "azure", modelId: "gpt-4o" })).status).toBe(200);
     expect(update.mock.calls[0]![0].data).toMatchObject({
       modelProvider: "azure",
       modelId: "gpt-4o",
@@ -7068,19 +7512,19 @@ describe("routines.update", () => {
 
   it("keeps an explicitly supplied thinking level when changing models", async () => {
     const { call, update } = fixture(false, false, ownModel);
-    expect((await call({ modelId: "new-model", thinkingLevel: "low" })).response.status).toBe(200);
+    expect((await call({ modelId: "new-model", thinkingLevel: "low" })).status).toBe(200);
     expect(update.mock.calls[0]![0].data).toMatchObject({ thinkingLevel: "low" });
   });
 
   it("rejects a partial patch whose resulting model is incomplete", async () => {
     const { call, update } = fixture(false, false, ownModel);
-    expect((await call({ modelId: null })).response.status).toBe(400);
+    expect((await call({ modelId: null })).status).toBe(400);
     expect(update).not.toHaveBeenCalled();
   });
 
   it("rejects thinking without a resulting model", async () => {
     const { call, update } = fixture(false);
-    expect((await call({ thinkingLevel: "high" })).response.status).toBe(400);
+    expect((await call({ thinkingLevel: "high" })).status).toBe(400);
     expect(update).not.toHaveBeenCalled();
   });
 
@@ -7092,10 +7536,70 @@ describe("routines.update", () => {
 
   it("leaves the schedule alone when an edit does not change it", async () => {
     const { call, update, enqueue } = fixture(false, false, recurring);
-    expect((await call({ name: "Renamed", runAt: undefined })).response.status).toBe(200);
+    expect((await call({ name: "Renamed", runAt: undefined })).status).toBe(200);
     expect(update.mock.calls[0]![0].data).not.toHaveProperty("nextRunAt");
     expect(update.mock.calls[0]![0].where).not.toHaveProperty("nextRunAt");
     expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("keeps a schedule that a concurrent enable armed while renaming", async () => {
+    const armedAt = new Date("2026-09-02T09:00:00.000Z");
+    const { call, update, enqueue, cancel } = fixture(false, false, {
+      crons: ["0 9 * * *"],
+    });
+    // The enable commits between the read and the write, so the row the
+    // update returns already carries the schedule it armed. The rename must
+    // keep that schedule instead of cancelling the armed wakeup.
+    update.mockImplementationOnce(
+      async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => ({
+        ...routine,
+        crons: ["0 9 * * *"],
+        active: true,
+        nextRunAt: armedAt,
+        ...Object.fromEntries(Object.entries(args.data).filter(([, value]) => value !== undefined)),
+      }),
+    );
+    const response = await call({ name: "Renamed", active: undefined, runAt: undefined });
+    expect(response.status).toBe(200);
+    expect(update.mock.calls[0]![0].data).not.toHaveProperty("nextRunAt");
+    expect(update.mock.calls[0]![0].where).not.toHaveProperty("nextRunAt");
+    expect(cancel).not.toHaveBeenCalled();
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledWith({
+      name: "routine.wakeup",
+      payload: { routineId: "routine-1", scheduledFor: armedAt.toISOString() },
+      availableAt: armedAt,
+      replaceKey: "routine:routine-1",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      json: { name: "Renamed", active: true, nextRunAt: armedAt.toISOString() },
+    });
+  });
+
+  it("rejects a schedule change when an enable landed after the read", async () => {
+    // The editor omits an unchanged on/off; the new schedule was computed for a paused routine.
+    const { call, update, enqueue } = fixture(false, false, { crons: ["0 9 * * *"] });
+    update.mockImplementationOnce(async (args) => {
+      expect(args.where).toMatchObject({ active: false });
+      throw Object.assign(new Error("not found"), { code: "P2025" });
+    });
+    expect(
+      (await call({ crons: ["0 10 * * *"], active: undefined, runAt: undefined })).status,
+    ).toBe(409);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("rejects an explicit on/off when a disable landed after the read", async () => {
+    // The editor sends `active` with every save. A disable that commits between the read and
+    // the write must not be undone by a rename that still says "on".
+    const { call, update, enqueue, cancel } = fixture(false, false, recurring);
+    update.mockImplementationOnce(async (args) => {
+      expect(args.where).toMatchObject({ active: true });
+      throw Object.assign(new Error("not found"), { code: "P2025" });
+    });
+    expect((await call({ name: "Renamed", active: true, runAt: undefined })).status).toBe(409);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
   });
 
   it("rejects a schedule change when the routine fired after the read", async () => {
@@ -7104,7 +7608,7 @@ describe("routines.update", () => {
       expect(args.where).toMatchObject({ nextRunAt: recurring.nextRunAt });
       throw Object.assign(new Error("not found"), { code: "P2025" });
     });
-    expect((await call({ crons: ["0 10 * * *"], runAt: undefined })).response.status).toBe(409);
+    expect((await call({ crons: ["0 10 * * *"], runAt: undefined })).status).toBe(409);
     expect(enqueue).not.toHaveBeenCalled();
   });
 });
@@ -7296,7 +7800,10 @@ describe("openai-compatible enabled models", () => {
     credential: Record<string, unknown>;
     preference: Record<string, unknown>;
   }) {
-    const withCredential = () => ({ ...state.preference, credential: state.credential });
+    const withCredential = (): Record<string, unknown> => ({
+      ...state.preference,
+      credential: state.credential,
+    });
     type PreferenceWhere = {
       isDefault?: boolean;
       modelId?: string;
@@ -7421,6 +7928,7 @@ describe("openai-compatible enabled models", () => {
           email: actor.email,
           name: "User",
           avatarStyle: "organic",
+          secrets: [],
         })),
       },
       $transaction: vi.fn(async (fn: (client: unknown) => unknown) => fn(prisma)),
@@ -7459,7 +7967,8 @@ describe("openai-compatible enabled models", () => {
       } as unknown as RouterDeps),
     );
     const call = async (path: string, body: unknown) => {
-      const { response } = await handler.handle(
+      const response = await handle(
+        handler,
         new Request(`http://127.0.0.1/rpc/${path}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -8085,7 +8594,8 @@ describe("threads.answerCall and threads.declineCall", () => {
     } satisfies Actor;
     const handler = new RPCHandler(createRouter(deps));
     const call = (path: string, json: Record<string, unknown>) =>
-      handler.handle(
+      handle(
+        handler,
         new Request(`http://127.0.0.1/rpc/threads/${path}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -8098,7 +8608,7 @@ describe("threads.answerCall and threads.declineCall", () => {
 
   it("answers a ringing call with the bot's opening", async () => {
     const { call, appended } = fixture();
-    const { response } = await call("answerCall", {});
+    const response = await call("answerCall", {});
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       json: { opening: "Hi, it's about the report.", reason: "Send the report" },
@@ -8111,13 +8621,13 @@ describe("threads.answerCall and threads.declineCall", () => {
 
   it("refuses to answer a call that is no longer ringing", async () => {
     const { call } = fixture("missed");
-    const { response } = await call("answerCall", {});
+    const response = await call("answerCall", {});
     expect(response.status).toBe(409);
   });
 
   it("marks a declined call without scheduling another", async () => {
     const { call, appended, prisma } = fixture();
-    const { response } = await call("declineCall", { outcome: "declined" });
+    const response = await call("declineCall", { outcome: "declined" });
     expect(response.status).toBe(200);
     expect(appended[0]?.payload).toMatchObject({
       blocks: [expect.objectContaining({ status: "declined" })],
@@ -8127,7 +8637,7 @@ describe("threads.answerCall and threads.declineCall", () => {
 
   it("rejects expired answers and records a missed call", async () => {
     const { call, appended } = fixture("ringing", 1, new Date(0).toISOString());
-    expect((await call("answerCall", {})).response.status).toBe(409);
+    expect((await call("answerCall", {})).status).toBe(409);
     expect(appended[0]?.payload).toMatchObject({
       blocks: [expect.objectContaining({ status: "missed" })],
     });
@@ -8136,7 +8646,7 @@ describe("threads.answerCall and threads.declineCall", () => {
   it("checks ownership within the active space", async () => {
     const { call, prisma } = fixture();
     vi.mocked(prisma.bot.findFirst).mockResolvedValue(null);
-    expect((await call("answerCall", {})).response.status).not.toBe(200);
+    expect((await call("answerCall", {})).status).not.toBe(200);
     expect(prisma.bot.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ id: "bot-1", userId: "user-1", spaceId: "space-1" }),
@@ -8206,7 +8716,8 @@ describe("threads.endCall", () => {
       events,
       enqueue,
       call: (extra: Record<string, unknown> = {}) =>
-        handler.handle(
+        handle(
+          handler,
           new Request("http://127.0.0.1/rpc/threads/endCall", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -8219,7 +8730,7 @@ describe("threads.endCall", () => {
 
   it("closes the card and queues a call_end run", async () => {
     const { call, created, events, tx, enqueue } = fixture();
-    const { response } = await call();
+    const response = await call();
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ json: { ok: true } });
     expect(created[0]?.blocks).toEqual([
@@ -8247,7 +8758,7 @@ describe("threads.endCall", () => {
 
   it("keeps the connected time the caller reported on the card", async () => {
     const { call, created } = fixture();
-    const { response } = await call({ durationSeconds: 83 });
+    const response = await call({ durationSeconds: 83 });
     expect(response.status).toBe(200);
     expect(created[0]?.blocks).toEqual([
       { kind: "voice_call", callId: "call-1", title: "", farewell: "", durationSeconds: 83 },
@@ -8256,14 +8767,14 @@ describe("threads.endCall", () => {
 
   it("rejects a negative connected time", async () => {
     const { call, created } = fixture();
-    const { response } = await call({ durationSeconds: -1 });
+    const response = await call({ durationSeconds: -1 });
     expect(response.status).toBe(400);
     expect(created).toEqual([]);
   });
 
   it("is a no-op for a late hang-up with no user call utterance", async () => {
     const { call, created, events, tx, enqueue } = fixture(false, false);
-    const { response } = await call();
+    const response = await call();
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ json: { ok: true } });
     expect(tx.message.findFirst).toHaveBeenCalledWith(
@@ -8283,7 +8794,7 @@ describe("threads.endCall", () => {
 
   it("is a no-op when a concurrent hang-up already wrote the marker", async () => {
     const { call, created, events, tx, enqueue } = fixture(true);
-    const { response } = await call();
+    const response = await call();
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ json: { ok: true } });
     expect(created).toEqual([]);
@@ -8311,7 +8822,9 @@ describe("groups.archive", () => {
       },
       run: {
         findMany: vi.fn().mockResolvedValue([{ id: "run-1", taskId: "task-1" }]),
-        updateMany: vi.fn(),
+        updateManyAndReturn: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) =>
+          where.id.in.map((id) => ({ id })),
+        ),
       },
       attempt: { updateMany: vi.fn() },
       task: { updateMany: vi.fn() },
@@ -8381,7 +8894,8 @@ describe("groups.archive", () => {
       isDeploymentOwner: true,
     } satisfies Actor;
 
-    const { response } = await new RPCHandler(createRouter(deps)).handle(
+    const response = await handle(
+      new RPCHandler(createRouter(deps)),
       new Request("http://127.0.0.1/rpc/groups/archive", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -8428,6 +8942,130 @@ describe("groups.archive", () => {
   });
 });
 
+describe("groups.remove", () => {
+  it("cancels the group's runs, then stops their work and expires their leases once deleted", async () => {
+    const calls: string[] = [];
+    // As in production: the run's computer is known only through its execution lease.
+    const tx = {
+      externalEffect: { deleteMany: vi.fn(async () => ({ count: 0 })) },
+      message: { findMany: vi.fn(async () => []) },
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "group-1" }]),
+      chatGroup: {
+        findUnique: vi.fn().mockResolvedValue({
+          artifacts: [],
+          members: [{ botId: "bot-1" }],
+          thread: { id: "thread-1" },
+        }),
+        delete: vi.fn(async () => {
+          calls.push("delete group");
+        }),
+      },
+      run: {
+        findMany: vi.fn().mockResolvedValue([{ id: "run-1", taskId: "task-1" }]),
+        updateManyAndReturn: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) => {
+          calls.push("cancel run");
+          return where.id.in.map((id) => ({ id }));
+        }),
+      },
+      attempt: { updateMany: vi.fn() },
+      task: { updateMany: vi.fn() },
+      // No page in the group had a link, so there are no tokens to delete.
+      page: { updateMany: vi.fn(async () => ({ count: 0 })) },
+      secret: { findMany: vi.fn(async () => []), deleteMany: vi.fn() },
+      computerExecutionLease: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([
+            { computerId: "computer-1", botId: "bot-1", runId: "run-1", fence: 3 },
+          ]),
+      },
+      computer: {
+        findMany: vi.fn(async ({ where }: { where: { OR?: unknown } }) =>
+          where.OR
+            ? [
+                {
+                  id: "computer-1",
+                  homeKey: "home-1",
+                  kind: "docker",
+                  providerRef: "computer-1",
+                  executionBotId: null,
+                  executionRunId: null,
+                },
+              ]
+            : [],
+        ),
+      },
+    };
+    const leaseUpdate = vi.fn(async () => {
+      calls.push("expire lease");
+    });
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+      computerExecutionLease: { updateMany: leaseUpdate },
+      computer: { updateMany: vi.fn() },
+    } as unknown as PrismaClient;
+    const releaseScreen = vi.fn(async () => {
+      calls.push("release screen");
+    });
+    const execute = vi.fn(() => {
+      calls.push("cancel run work");
+      return [];
+    });
+    const deps = {
+      prisma,
+      env: {
+        defaultProvider: "fake",
+        defaultModel: "fake-model",
+        webOrigin: "http://127.0.0.1:5173",
+        screenProxySecret: "fake-test-secret",
+        sandboxProvider: "fake",
+      },
+      dataDir: "/tmp/anviq-router-test",
+      sandbox: { releaseScreen, execute },
+      jobs: { cancel: vi.fn().mockResolvedValue(undefined) },
+      artifacts: { remove: vi.fn() },
+    } as unknown as RouterDeps;
+    const actor = {
+      spaceId: "workspace-1",
+      userId: "user-1",
+      email: "user@example.test",
+      isDeploymentOwner: true,
+    } satisfies Actor;
+
+    const response = await handle(
+      new RPCHandler(createRouter(deps)),
+      new Request("http://127.0.0.1/rpc/groups/remove", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ json: { groupId: "group-1" } }),
+      }),
+      { prefix: "/rpc", context: { actor } },
+    );
+
+    expect(response?.status).toBe(200);
+    expect(releaseScreen).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "computer-1" }),
+      expect.objectContaining({
+        botId: "bot-1",
+        runId: "run-1",
+        screenLeaseId: screenLeaseIdForRun({ runId: "run-1", fence: 3 }, "run-1"),
+        cancelRunWork: true,
+      }),
+    );
+    expect(leaseUpdate).toHaveBeenCalledWith({
+      where: { runId: { in: ["run-1"] } },
+      data: { expiresAt: new Date(0) },
+    });
+    expect(calls).toEqual([
+      "cancel run",
+      "delete group",
+      "cancel run work",
+      "release screen",
+      "expire lease",
+    ]);
+  });
+});
+
 describe("boards.rename", () => {
   const actor = {
     spaceId: "workspace-1",
@@ -8450,24 +9088,30 @@ describe("boards.rename", () => {
 
   function renameDeps(tickets: number, ticketPrefix = "RAK") {
     const count = vi.fn(async () => tickets);
-    const update = vi.fn(async ({ data }: { data: { name?: string; ticketPrefix?: string } }) => ({
+    const applied = ({ data }: { data: { name?: string; ticketPrefix?: string } }) => ({
       ...boardRow(ticketPrefix),
       ...data,
       updatedAt: new Date("2026-06-02T00:00:00.000Z"),
-    }));
+    });
+    const update = vi.fn(applied);
+    const updateManyAndReturn = vi.fn(
+      async (args: { data: { name?: string; ticketPrefix?: string } }) => [applied(args)],
+    );
     const prisma = {
       board: {
         findUnique: vi.fn(async () => boardRow(ticketPrefix)),
         update,
+        updateManyAndReturn,
       },
       ticket: { count },
     } as unknown as PrismaClient;
     const deps = { prisma, env: { ticketBoardEnabled: true } } as unknown as RouterDeps;
-    return { count, update, handler: new RPCHandler(createRouter(deps)) };
+    return { count, update, updateManyAndReturn, handler: new RPCHandler(createRouter(deps)) };
   }
 
-  async function rename(handler: RPCHandler<never>, body: unknown) {
-    const { response } = await handler.handle(
+  async function rename(handler: RouterHandler, body: unknown) {
+    const response = await handle(
+      handler,
       new Request("http://127.0.0.1/rpc/boards/rename", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -8475,11 +9119,11 @@ describe("boards.rename", () => {
       }),
       { prefix: "/rpc", context: { actor } },
     );
-    return response;
+    return response!;
   }
 
   it("rejects a prefix change after tickets exist", async () => {
-    const { count, update, handler } = renameDeps(2);
+    const { count, update, updateManyAndReturn, handler } = renameDeps(2);
     const response = await rename(handler, { ticketPrefix: "OPS" });
     expect(response?.status).toBe(400);
     await expect(response?.json()).resolves.toEqual({
@@ -8492,10 +9136,77 @@ describe("boards.rename", () => {
       where: { boardId: "board-1", spaceId: "workspace-1" },
     });
     expect(update).not.toHaveBeenCalled();
+    expect(updateManyAndReturn).not.toHaveBeenCalled();
+  });
+
+  it("changes the prefix while the board has no tickets", async () => {
+    const { count, update, updateManyAndReturn, handler } = renameDeps(0);
+    const response = await rename(handler, { ticketPrefix: "OPS" });
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toEqual({
+      json: expect.objectContaining({ ticketPrefix: "OPS" }),
+    });
+    expect(count).toHaveBeenCalledWith({
+      where: { boardId: "board-1", spaceId: "workspace-1" },
+    });
+    expect(updateManyAndReturn).toHaveBeenCalledWith({
+      where: {
+        id: "board-1",
+        spaceId: "workspace-1",
+        nextNumber: 2,
+        tickets: { none: {} },
+      },
+      data: { ticketPrefix: "OPS" },
+    });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("rejects the prefix change when a ticket lands between the count and the write", async () => {
+    const { count, update, updateManyAndReturn, handler } = renameDeps(0);
+    updateManyAndReturn.mockResolvedValueOnce([]);
+    const response = await rename(handler, { name: "Launch", ticketPrefix: "OPS" });
+    expect(response?.status).toBe(400);
+    await expect(response?.json()).resolves.toEqual({
+      json: expect.objectContaining({
+        code: "BAD_REQUEST",
+        message: "Cannot change the ticket prefix once tickets exist.",
+      }),
+    });
+    expect(count).toHaveBeenCalledTimes(1);
+    expect(updateManyAndReturn).toHaveBeenCalledWith({
+      where: {
+        id: "board-1",
+        spaceId: "workspace-1",
+        nextNumber: 2,
+        tickets: { none: {} },
+      },
+      data: { name: "Launch", ticketPrefix: "OPS" },
+    });
+    // The conditional write matched nothing, so no unconditional retry may
+    // apply the name change either.
+    expect(update).not.toHaveBeenCalled();
+    expect(updateManyAndReturn).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the normal update path when the prefix only differs in case", async () => {
+    const { count, update, updateManyAndReturn, handler } = renameDeps(2);
+    const response = await rename(handler, { ticketPrefix: "rak" });
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toEqual({
+      json: expect.objectContaining({ ticketPrefix: "RAK" }),
+    });
+    expect(count).not.toHaveBeenCalled();
+    // The case-only request rewrites nothing, so the write must not replay the
+    // observed prefix over one a concurrent rename may have committed.
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "board-1" },
+      data: {},
+    });
+    expect(updateManyAndReturn).not.toHaveBeenCalled();
   });
 
   it("renames the board without changing the prefix", async () => {
-    const { count, update, handler } = renameDeps(2);
+    const { count, update, updateManyAndReturn, handler } = renameDeps(2);
     const response = await rename(handler, { name: "Launch" });
     expect(response?.status).toBe(200);
     await expect(response?.json()).resolves.toEqual({
@@ -8506,6 +9217,7 @@ describe("boards.rename", () => {
       where: { id: "board-1" },
       data: { name: "Launch" },
     });
+    expect(updateManyAndReturn).not.toHaveBeenCalled();
   });
 });
 
@@ -8518,7 +9230,9 @@ describe("boards.tickets.list", () => {
   } satisfies Actor;
 
   function listDeps() {
-    const findMany = vi.fn(async () => []);
+    type TextMatch = { contains: string };
+    type Where = { OR?: Array<{ title?: TextMatch; description?: TextMatch }> };
+    const findMany = vi.fn(async (_args: { where: Where }) => []);
     const prisma = {
       board: {
         findUnique: vi.fn(async () => ({
@@ -8556,7 +9270,8 @@ describe("boards.tickets.list", () => {
       { ...ticketRow, id: "a", title: "Half price", description: "Save 50%_off today" },
       { ...ticketRow, id: "b", title: "Other", description: "5000 off everything" },
     ]);
-    const { response } = await handler.handle(
+    const response = await handle(
+      handler,
       new Request("http://127.0.0.1/rpc/tickets/list", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -8596,7 +9311,11 @@ describe("export.bot", () => {
     return home;
   }
 
-  async function exportFiles(scope: "team" | "dedicated", home: LocalAgentHomeStore) {
+  async function exportManifest(
+    scope: "team" | "dedicated",
+    home: LocalAgentHomeStore,
+    appearance?: { color: string; avatarSet?: "organic" | "anviq" },
+  ) {
     const prisma = {
       bot: {
         findFirst: vi.fn().mockResolvedValue({
@@ -8605,6 +9324,7 @@ describe("export.bot", () => {
           title: "",
           description: "",
           instructions: "",
+          ...appearance,
           thread: { id: "thread-1" },
           computer: { id: "computer-1", scope, homeKey: "home-1" },
         }),
@@ -8625,8 +9345,23 @@ describe("export.bot", () => {
     } as unknown as RouterDeps;
     const client = createRouterClient(createRouter(deps), { context: { actor } as never });
     const manifest = await client.export.bot({ botId: "bot-1" });
-    return manifest.files.sort((a, b) => a.path.localeCompare(b.path));
+    return manifest;
   }
+
+  async function exportFiles(scope: "team" | "dedicated", home: LocalAgentHomeStore) {
+    return (await exportManifest(scope, home)).files.sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  it.each(["#8B5CF6::shape_3", "data:image/png;base64,aGVsbG8="])(
+    "exports the selected set and untouched avatar value (%s)",
+    async (color) => {
+      const manifest = await exportManifest("team", await homeWith({}), {
+        color,
+        avatarSet: "anviq",
+      });
+      expect(manifest.bot).toMatchObject({ color, avatarSet: "anviq" });
+    },
+  );
 
   it("exports only the bot's own folder from a Team Computer", async () => {
     const home = await homeWith({
@@ -8985,6 +9720,103 @@ describe("API-key live model catalog", () => {
           where: expect.objectContaining({ userId: actor.userId, spaceId: null }),
         }),
       );
+    },
+  );
+});
+
+describe("quarantined computer stop", () => {
+  it.each(["already-quarantined", "before-claim", "during-stop"])(
+    "preserves the recovery fence (%s)",
+    async (race) => {
+      const row = {
+        id: "computer",
+        kind: "novita",
+        providerRef: "guest",
+        homeKey: "home",
+        scope: "dedicated",
+        state: race === "already-quarantined" ? "quarantined" : "running",
+        controlHolder: "none",
+        controlLeaseId: null,
+        controlBotId: null,
+        controlRunId: null,
+        homeRevision: "saved",
+        screenGeneration: 1,
+      };
+      const endRun = vi.fn();
+      const updateMany = vi.fn(async ({ where, data }) => {
+        if (race === "before-claim") row.state = "quarantined";
+        if (typeof where.state === "string" && where.state !== row.state) return { count: 0 };
+        if (where.state?.notIn?.includes(row.state)) return { count: 0 };
+        Object.assign(row, data);
+        return { count: 1 };
+      });
+      const prisma = {
+        bot: {
+          findFirst: vi.fn(async () => {
+            const snapshot = { ...row };
+            return {
+              id: "bot",
+              spaceId: "space",
+              userId: "user",
+              screenGeneration: 1,
+              thread: { id: "thread" },
+              computer: snapshot,
+            };
+          }),
+        },
+        computer: { updateMany },
+        computerRun: { updateMany: endRun },
+        computerExecutionLease: {
+          updateMany: vi.fn(async () => ({ count: 0 })),
+          findUnique: vi.fn(async () => null),
+        },
+        run: { findFirst: vi.fn(async () => null) },
+      } as unknown as PrismaClient;
+      const checkpoint = vi
+        .spyOn(adapters, "checkpointAndStopComputer")
+        .mockImplementation(async () => {
+          if (race === "during-stop") row.state = "quarantined";
+        });
+      const deps = {
+        prisma,
+        sandbox: { stop: vi.fn(async () => undefined) },
+        jobs: { cancel: vi.fn(async () => undefined) },
+        env: {
+          defaultProvider: "fake",
+          defaultModel: "fake-model",
+          sandboxProvider: "novita",
+          webOrigin: "http://127.0.0.1:5173",
+          screenProxySecret: "test-secret",
+        },
+      } as unknown as RouterDeps;
+      try {
+        const handler = new RPCHandler(createRouter(deps));
+        const response = await handle(
+          handler,
+          new Request("http://127.0.0.1/rpc/computer/stop", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ json: { botId: "bot" } }),
+          }),
+          {
+            prefix: "/rpc",
+            context: {
+              actor: {
+                userId: "user",
+                spaceId: "space",
+                email: "user@anviq.test",
+                isDeploymentOwner: true,
+              },
+            },
+          },
+        );
+        expect(response.status).toBe(race === "before-claim" ? 409 : 200);
+        expect(row.state).toBe("quarantined");
+        expect(endRun).not.toHaveBeenCalled();
+        if (race !== "during-stop") expect(checkpoint).not.toHaveBeenCalled();
+      } finally {
+        checkpoint.mockRestore();
+      }
     },
   );
 });

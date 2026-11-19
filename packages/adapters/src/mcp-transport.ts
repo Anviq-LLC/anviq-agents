@@ -1,4 +1,5 @@
 import { isLocalhostOrLoopbackIp } from "@anviq/contracts";
+import { cancelResponseBody } from "@anviq/core";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
@@ -8,7 +9,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult, ListToolsResult } from "@modelcontextprotocol/sdk/types.js";
 import { combineSignals } from "./connector-safety.js";
-
+import { closeMcpResource } from "./mcp-close.js";
 import type { InstalledMcpBin } from "./mcp-package-installer.js";
 import {
   isInstalledMcpBin,
@@ -118,6 +119,10 @@ export interface McpClientOptions {
 const DEFAULT_HEADERS = ["accept", "content-type", "authorization", "user-agent"];
 const RESOURCE_HEADERS = new Set(["mcp-session-id", "mcp-protocol-version", "last-event-id"]);
 const DEFAULT_MAX_URL_LENGTH = 2_048;
+// A Request owns the abort link for its signal in affected Node versions. Keep
+// that owner alive while a fetch/body still retains the signal, without keeping
+// completed requests alive once the signal is no longer used.
+const requestSignalOwners = new WeakMap<AbortSignal, Request>();
 
 function validateUrl(raw: string | URL, policy: McpUrlPolicy = {}): URL {
   const url = new URL(raw.toString());
@@ -179,6 +184,7 @@ export function secureFetch(
     allowPrivateEndpoint: urlPolicy.allowPrivateEndpoint,
   });
   const request = async (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
+    if (input instanceof Request) requestSignalOwners.set(input.signal, input);
     const source = new Request(input, init);
     // OAuth challenges and rediscovery can supply new URLs. Only the explicitly
     // configured local resource origin (including port) may bypass remote policy.
@@ -214,12 +220,20 @@ export function secureFetch(
       headers,
       body,
       redirect: "manual",
-      signal: source.signal,
+      // Request's derived signal can lose its abort link when the temporary
+      // Request is collected. Forward the caller's signal for the whole SSE body.
+      signal:
+        init?.signal !== undefined
+          ? init.signal
+          : input instanceof Request
+            ? input.signal
+            : undefined,
     } satisfies RequestInit;
     const response = localHttp
       ? await (network.fetch ?? globalThis.fetch)(url, requestInit)
       : await safeRemoteFetch(url, requestInit);
     if (response.status >= 300 && response.status < 400) {
+      cancelResponseBody(response);
       throw new Error("MCP redirects are not permitted; configure the final HTTPS URL explicitly");
     }
     return limitMcpResponseBody(response, headers);
@@ -385,11 +399,14 @@ export class McpSession {
           (options.fallbackToSse ?? true) &&
           options.allowLegacySse &&
           (options.transport ?? "streamable-http") === "streamable-http";
-        await this.client.close().catch(() => undefined);
+        await closeMcpResource(() => this.client.close());
         this.connected = false;
         this.transport = undefined;
         if (!canFallback) {
-          await this.remoteFetch?.close().catch(() => undefined);
+          if (this.remoteFetch) {
+            const remoteFetch = this.remoteFetch;
+            await closeMcpResource(() => remoteFetch.close());
+          }
           this.remoteFetch = undefined;
           throw error;
         }
@@ -457,13 +474,20 @@ export class McpSession {
     })) as CallToolResult;
   }
 
-  async close(): Promise<void> {
+  /** `afterClose` follows actual SDK shutdown, even if this call stops waiting. */
+  async close(afterClose?: () => Promise<void>): Promise<void> {
     this.connecting = undefined;
     this.connected = false;
-    await this.client.close().catch(() => undefined);
-    await this.remoteFetch?.close().catch(() => undefined);
+    const client = this.client;
+    const remoteFetch = this.remoteFetch;
     this.remoteFetch = undefined;
     this.transport = undefined;
+    await closeMcpResource(() =>
+      Promise.resolve()
+        .then(() => client.close())
+        .finally(afterClose),
+    );
+    if (remoteFetch) await closeMcpResource(() => remoteFetch.close());
   }
 
   private assertConnected(): void {

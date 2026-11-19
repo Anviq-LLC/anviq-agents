@@ -3,7 +3,7 @@
     "name": "Anviq Agents",
     "slug": "anviq",
     "scheme": "anviq",
-    "version": "1.0.10",
+    "version": "1.0.12",
     "orientation": "default",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
@@ -53,14 +53,43 @@
           "microphonePermission": "Anviq Agents uses the microphone for voice calls with your bots."
         }
       ],
-      "expo-sharing",
+      [
+        "expo-sharing",
+        {
+          "android": {
+            "enabled": true,
+            "singleShareMimeTypes": [
+              "text/*",
+              "image/*",
+              "audio/*",
+              "video/mp4",
+              "application/pdf",
+              "application/json",
+              "application/zip"
+            ],
+            "multipleShareMimeTypes": [
+              "image/*",
+              "audio/*",
+              "video/mp4",
+              "application/pdf",
+              "application/json",
+              "application/zip"
+            ]
+          }
+        }
+      ],
       "./plugins/with-worklets-headers",
-      "./plugins/with-scene-lifecycle"
+      "./plugins/with-scene-lifecycle",
+      "./plugins/with-lan-cleartext",
+      "./plugins/with-app-intents"
     ],
+    "locales": {
+      "es": "./locales/es.json"
+    },
     "ios": {
       "bundleIdentifier": "com.anviq.app",
       "buildNumber": "1",
-      "supportsTablet": false,
+      "supportsTablet": true,
       "icon": "../../packages/ui-tokens/assets/Anviq.icon",
       "config": {
         "usesNonExemptEncryption": false
@@ -71,7 +100,11 @@
         "NSLocalNetworkUsageDescription": "Anviq Agents connects to a self-hosted Anviq Agents server on your local network.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
-        }
+        },
+        "UIBackgroundModes": ["voip", "audio", "remote-notification"]
+      },
+      "entitlements": {
+        "com.apple.developer.usernotifications.time-sensitive": true
       }
     },
     "android": {
@@ -90,7 +123,22 @@
     },
     "extra": {
       "router": {},
-      "supportsRTL": true
+      "supportsRTL": true,
+      "eas": {
+        "projectId": "07f7eb04-45e3-47fe-9374-99a2f991131e",
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "targetName": "AnviqWidgets",
+                  "bundleIdentifier": "com.anviq.app.widgets"
+                }
+              ]
+            }
+          }
+        }
+      }
     },
     "runtimeVersion": {
       "policy": "appVersion"

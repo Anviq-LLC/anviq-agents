@@ -9,6 +9,7 @@ import { writeSaved } from "@anviq/core/query";
 import { Button, Input, ToggleGroup, ToggleGroupItem } from "@anviq/ui-web";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useSpaceQueries } from "../lib/query";
 import { useSpaceRpc } from "../lib/space-rpc";
@@ -179,7 +180,7 @@ export function ApprovalRulesSettings({ scope }: { scope: SettingsScope }) {
         </form>
       ) : null}
       {rules.length > 0 ? (
-        <SettingsGroup data-testid="approval-rules">
+        <SettingsGroup title={<Trans>Rules</Trans>} data-testid="approval-rules">
           {rules.map((rule) => (
             <SettingsRow
               key={rule.id}
@@ -226,12 +227,13 @@ export function ApprovalRulesSettings({ scope }: { scope: SettingsScope }) {
                   )}
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="text-muted-foreground"
+                    size="icon-sm"
+                    aria-label={t`Remove`}
+                    className="text-destructive hover:text-destructive"
                     disabled={saving}
                     onClick={() => void removeRule(rule)}
                   >
-                    <Trans>Remove</Trans>
+                    <Trash2 />
                   </Button>
                 </>
               }

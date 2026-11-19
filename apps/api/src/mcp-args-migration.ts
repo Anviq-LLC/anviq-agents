@@ -2,6 +2,7 @@ import type { SecretStore } from "@anviq/adapter-kit";
 import { persistPreparedSecret } from "@anviq/adapters";
 import type { PrismaClient } from "@anviq/db";
 import { getLogger } from "@anviq/logging";
+import { serverSecretSpace } from "./availability.js";
 import type { McpSecretMaterial } from "./mcp-material.js";
 import { legacyMcpArgs } from "./mcp-material.js";
 
@@ -63,7 +64,7 @@ export async function moveMcpArgsIntoSecrets(
               data: {
                 id: stored.id,
                 userId: row.userId,
-                spaceId: secret ? secret.spaceId : current.spaceId,
+                spaceId: secret ? secret.spaceId : await serverSecretSpace(tx, current),
                 kind: "mcp",
                 ciphertext: stored.ciphertext,
               },

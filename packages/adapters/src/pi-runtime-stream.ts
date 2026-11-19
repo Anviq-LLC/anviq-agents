@@ -15,6 +15,7 @@ import {
   modelStreamIdleTimeoutMs,
   modelStreamMaxRetries,
   modelStreamTimeoutMs,
+  operatorMaxTokens,
   resolveCompletionMaxTokens,
 } from "./pi-runtime-limits.js";
 import { fetchPairedWithDispatcher } from "./undici-fetch.js";
@@ -271,6 +272,7 @@ export function reliableStreamOptions(
       options?.maxTokens,
       model.reasoning,
       model.contextWindow,
+      operatorMaxTokens(model),
     ),
   };
 

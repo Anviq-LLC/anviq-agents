@@ -2,12 +2,8 @@ import type { DurableMemoryScope, SecretStore, SemanticMemoryProvider } from "@a
 import type { PrismaClient } from "@anviq/db";
 import { contentEncryptionOf } from "@anviq/db";
 import { getLogger } from "@anviq/logging";
-import {
-  createMemoryEngine,
-  type MemoryEngine,
-  type MirrorMode,
-  type MirrorResult,
-} from "@anviq/memory-engine";
+import type { MemoryEngine, MirrorMode, MirrorResult } from "@anviq/memory-engine";
+import { createMemoryEngine } from "@anviq/memory-engine";
 import { Client } from "pg";
 import { ANVIQ_MEMORY_PROVIDER_ID, AnviqMemoryProvider } from "./anviq-memory-provider.js";
 import {

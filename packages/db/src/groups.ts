@@ -1,9 +1,11 @@
 import type { Actor, Group, GroupMember, SpaceGroup } from "@anviq/contracts";
-import { GROUP_MEMBER_MAX, GROUP_MEMBER_MIN } from "@anviq/contracts";
+import { GROUP_MEMBER_MAX, GROUP_MEMBER_MIN, resolveBotAvatarSet } from "@anviq/contracts";
 import { displayName } from "@anviq/core";
 import { cancelRunsInTransaction } from "./cancel-runs.js";
 import type { Prisma, PrismaClient } from "./client.js";
 import { expireComputerExecutionLeases, restoreBotUnderComputerQuota } from "./computers.js";
+import { transientRunEventsWhere } from "./events.js";
+import { deletePageShareSecrets } from "./page-shares.js";
 import { withNewestThreadMessages } from "./preview-messages.js";
 import { IsolationError } from "./scope.js";
 import { lockSpaceForContentCreation } from "./spaces.js";
@@ -37,6 +39,7 @@ type GroupRecord = {
       name: string;
       color: string;
       userId?: string;
+      avatarSet?: string;
       runs: Array<{ status: string }>;
     };
   }>;
@@ -90,6 +93,7 @@ function mapGroupMembers(members: GroupRecord["members"]): GroupMember[] {
     botId: member.bot.id,
     name: member.bot.name,
     color: member.bot.color,
+    avatarSet: resolveBotAvatarSet(member.bot.avatarSet),
     status: primaryActiveRun(member.bot.runs)?.status ?? "idle",
     ...(member.bot.userId ? { ownerUserId: member.bot.userId } : {}),
   }));
@@ -158,14 +162,19 @@ async function assertOwnedBots(
       // A group in a team space can hold the person's linked bots as well.
       linkedFromBotId: undefined,
     },
-    select: { id: true, name: true, color: true },
+    select: { id: true, name: true, color: true, avatarSet: true },
   });
   if (bots.length !== unique.length) throw new IsolationError();
   const botsById = new Map(bots.map((bot) => [bot.id, bot]));
   return unique.map((botId) => {
     const bot = botsById.get(botId);
     if (!bot) throw new IsolationError();
-    return { botId: bot.id, name: bot.name, color: bot.color };
+    return {
+      botId: bot.id,
+      name: bot.name,
+      color: bot.color,
+      avatarSet: resolveBotAvatarSet(bot.avatarSet),
+    };
   });
 }
 
@@ -209,6 +218,7 @@ const groupInclude = {
           name: true,
           color: true,
           userId: true,
+          avatarSet: true,
           runs: activeRunSelection,
         },
       },
@@ -241,6 +251,7 @@ const groupTargetInclude = {
           name: true,
           color: true,
           userId: true,
+          avatarSet: true,
           runs: activeRunSelection,
         },
       },
@@ -511,7 +522,7 @@ export function createGroupRepos(prisma: PrismaClient) {
         pinned?: boolean;
         sectionId?: string | null;
       },
-    ): Promise<{ group: Group; cancelledRunIds: string[] }> {
+    ): Promise<{ group: Group; cancelledRunIds: string[]; computers: RunTeardownTarget[] }> {
       // Bots that guests of a shared chat brought in stay as they are; the host edits their own.
       const guestBotIds = input.botIds
         ? new Set(
@@ -588,10 +599,12 @@ export function createGroupRepos(prisma: PrismaClient) {
               select: { id: true, taskId: true, userId: true, spaceId: true },
             })
           : [];
-        if (activeRuns.length) {
-          const now = new Date();
-          await cancelRunsInTransaction(tx, activeRuns, now);
-        }
+        const runIds = (await cancelRunsInTransaction(tx, activeRuns, new Date())).map(
+          (run) => run.id,
+        );
+        // After cancelling: its row locks keep these runs from acquiring a computer, so every
+        // lease they hold is in the snapshot.
+        const { targets } = await snapshotRunTeardownTargets(tx, runIds);
         if (input.name !== undefined) {
           await tx.chatGroup.update({
             where: { id: input.groupId },
@@ -621,13 +634,15 @@ export function createGroupRepos(prisma: PrismaClient) {
         });
         return {
           group: await attachNewestGroupMessage(tx, loaded),
-          cancelledRunIds: activeRuns.map((run) => run.id),
+          cancelledRunIds: runIds,
+          computers: targets,
         };
       });
       if (!updated.group.thread) throw new IsolationError();
       return {
         group: mapGroup(updated.group as GroupRecord, actor.userId),
         cancelledRunIds: updated.cancelledRunIds,
+        computers: updated.computers,
       };
     },
 
@@ -652,18 +667,16 @@ export function createGroupRepos(prisma: PrismaClient) {
           },
           select: { id: true, taskId: true, userId: true, spaceId: true },
         });
-        const runIds = activeRuns.map((run) => run.id);
         const now = new Date();
-        // Snapshot before cancellation commits. An expired lease that has not been
-        // reclaimed still names this run's screen.
-        const { targets } = await snapshotRunTeardownTargets(tx, runIds);
-
+        const runIds = (await cancelRunsInTransaction(tx, activeRuns, now)).map((run) => run.id);
         if (runIds.length) {
-          await cancelRunsInTransaction(tx, activeRuns, now);
           await tx.event.deleteMany({
-            where: { type: "thread.progress", runId: { in: runIds } },
+            where: { ...transientRunEventsWhere(), runId: { in: runIds } },
           });
         }
+        // Snapshot after cancelling, before commit: the run row locks keep these runs from
+        // acquiring a computer, and an expired lease not yet reclaimed still names a screen.
+        const { targets } = await snapshotRunTeardownTargets(tx, runIds);
 
         await tx.chatGroup.update({
           where: { id: groupId },
@@ -674,7 +687,7 @@ export function createGroupRepos(prisma: PrismaClient) {
       });
     },
 
-    /** After an archive's teardown: expire the cancelled runs' leases and legacy columns. */
+    /** After teardown: expire the cancelled runs' leases and legacy columns. */
     async releaseArchivedRunLeases(runIds: string[]) {
       if (runIds.length === 0) return;
       await expireComputerExecutionLeases(prisma, { runId: { in: runIds } });
@@ -725,14 +738,31 @@ export function createGroupRepos(prisma: PrismaClient) {
           select: {
             artifacts: { select: { storageKey: true } },
             members: { orderBy: groupMemberOrder, take: 1, select: { botId: true } },
+            thread: { select: { id: true } },
           },
         });
         const contextBotId = group?.members[0]?.botId;
         if (!contextBotId) throw new IsolationError();
+        // The thread's runs cascade away with the group, but their computer leases don't:
+        // cancel them first so the route can stop their work and release the leases.
+        const activeRuns = group.thread
+          ? await tx.run.findMany({
+              where: { threadId: group.thread.id, status: { in: activeRunStatuses } },
+              select: { id: true, taskId: true, userId: true, spaceId: true },
+            })
+          : [];
+        const runIds = (await cancelRunsInTransaction(tx, activeRuns, new Date())).map(
+          (run) => run.id,
+        );
+        const { targets } = await snapshotRunTeardownTargets(tx, runIds);
+        const pageShareSecrets = await deletePageShareSecrets(tx, { groupId });
         await tx.chatGroup.delete({ where: { id: groupId } });
         return {
           contextBotId,
           artifactStorageKeys: group.artifacts.map((artifact) => artifact.storageKey),
+          cancelledRunIds: runIds,
+          computers: targets,
+          pageShareSecrets,
         };
       });
     },

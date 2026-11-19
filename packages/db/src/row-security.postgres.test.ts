@@ -111,6 +111,7 @@ function rowsFor(t: Tenant, tag: string): Array<[string, Record<string, unknown>
         ciphertext: "c",
       },
     ],
+    ["trustedLinkSite", { userId: t.userId, site: `${tag}.example.test` }],
   ];
 }
 
@@ -259,11 +260,13 @@ describePostgres("row-level security (PostgreSQL)", () => {
         "agentSkill",
         "userVoiceCredential",
         "userIntegrationProviderConfig",
+        "trustedLinkSite",
       ].map(async (table) => {
         const scope = [
           "userVoiceCredential",
           "vaultCredential",
           "userIntegrationProviderConfig",
+          "trustedLinkSite",
         ].includes(table)
           ? "userId"
           : "spaceId";
@@ -716,7 +719,7 @@ describePostgres("row-level security (PostgreSQL)", () => {
     ).rejects.toThrow(/row-level security/);
   });
 
-  it("applies the same rules to secrets, skills and voice credentials", async () => {
+  it("applies the same rules to secrets, skills, voice credentials and trusted link sites", async () => {
     const none = {
       botSecret: [],
       vaultCredential: [],
@@ -725,6 +728,7 @@ describePostgres("row-level security (PostgreSQL)", () => {
       agentSkill: [],
       userVoiceCredential: [],
       userIntegrationProviderConfig: [],
+      trustedLinkSite: [],
     };
     expect(await owners()).toEqual(none);
     expect(await runAsTenant(a, owners)).toEqual({
@@ -736,6 +740,7 @@ describePostgres("row-level security (PostgreSQL)", () => {
       agentSkill: [a.spaceId],
       userVoiceCredential: [a.userId],
       userIntegrationProviderConfig: [a.userId],
+      trustedLinkSite: [a.userId],
     });
     const everyone = await runAsSystem("row-level security test", owners);
     expect(everyone.agentSkill).toEqual(tenants.map((t) => t.spaceId).sort());
@@ -748,6 +753,30 @@ describePostgres("row-level security (PostgreSQL)", () => {
     }
     // The unscoped reads and writes above are deliberate.
     drainUnscopedDatabaseAccess();
+  });
+
+  it("shows a user's trusted link sites in every space and no one else's", async () => {
+    const sites = () =>
+      db.trustedLinkSite.findMany({
+        where: { userId: { in: tenants.map((t) => t.userId) } },
+        select: { userId: true, site: true },
+      });
+    // The user of one space reading from another space they belong to.
+    expect(await runAsTenant({ spaceId: b.spaceId, userId: a.userId }, sites)).toEqual([
+      { userId: a.userId, site: `fixture.example.test` },
+    ]);
+    expect(
+      await runAsTenant(b, () => db.trustedLinkSite.deleteMany({ where: { userId: a.userId } })),
+    ).toEqual({ count: 0 });
+    // Trusting a site again, as the API does, is a no-op under the policy.
+    expect(
+      await runAsTenant(a, () =>
+        db.trustedLinkSite.createMany({
+          data: { userId: a.userId, site: "fixture.example.test" },
+          skipDuplicates: true,
+        }),
+      ),
+    ).toEqual({ count: 0 });
   });
 
   it("keeps normal reads, writes and transactions working for the tenant", async () => {

@@ -1,5 +1,13 @@
+import { McpServerConfigInput } from "@anviq/contracts";
 import { describe, expect, it } from "vitest";
-import { buildMcpUpdateMaterial } from "./mcp-material.js";
+import { buildMcpUpdateMaterial as buildFromParsed } from "./mcp-material.js";
+
+// The router parses an update before building its material, so the tests do too.
+const buildMcpUpdateMaterial = (
+  existing: Parameters<typeof buildFromParsed>[0],
+  input: unknown,
+  options?: Parameters<typeof buildFromParsed>[2],
+) => buildFromParsed(existing, McpServerConfigInput.parse(input), options);
 
 describe("buildMcpUpdateMaterial", () => {
   it("keeps the stored blob untouched when the update carries no credential data", () => {
@@ -562,10 +570,10 @@ describe("buildMcpUpdateMaterial", () => {
       ).toEqual({ action: "store", material: {} });
     });
 
-    it("drops the files when the server is no longer stdio", () => {
+    it("drops the files and arguments when the server is no longer stdio", () => {
       expect(
         buildMcpUpdateMaterial(
-          { secret: "s", files: { CREDENTIALS_PATH: template } },
+          { secret: "s", args: ["--api-key", "fake-key"], files: { CREDENTIALS_PATH: template } },
           {
             transport: "streamable_http",
             slug: "x",

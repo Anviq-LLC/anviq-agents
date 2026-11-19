@@ -1,5 +1,11 @@
 import { MEMORY_REVISION_CONFLICT_ERROR } from "@anviq/adapter-kit";
-import { isScratchpadStatus, listScratchpadItems, mapScratchpadItem } from "@anviq/adapters";
+import {
+  buildAgentMemoryPrompt,
+  isScratchpadStatus,
+  listScratchpadItems,
+  mapScratchpadItem,
+  readAgentMemory,
+} from "@anviq/adapters";
 import { isDeletableMemoryDocument } from "@anviq/contracts";
 import { findSpaceMemoryConfig, IsolationError } from "@anviq/db";
 import { ORPCError } from "@orpc/server";
@@ -33,6 +39,19 @@ export function memoryRoutes(ctx: RouterContext) {
           revision: doc.revision,
           updatedAt: doc.updatedAt.toISOString(),
         }));
+      }),
+      budget: authed.memory.budget.handler(async ({ context, input }) => {
+        await repos.getBot(context.actor, input.botId);
+        // Read through the store a run uses, so the numbers match what the bot receives.
+        const documents = await readAgentMemory(deps.memory, input.botId, {
+          operationId: "mem",
+          traceId: "mem",
+          spaceId: context.actor.spaceId,
+          userId: context.actor.userId,
+          botId: input.botId,
+          signal: context.signal ?? new AbortController().signal,
+        });
+        return buildAgentMemoryPrompt(documents).plan;
       }),
       update: authed.memory.update.handler(async ({ context, input }) => {
         const doc = await deps.prisma.memoryDocument.findFirst({

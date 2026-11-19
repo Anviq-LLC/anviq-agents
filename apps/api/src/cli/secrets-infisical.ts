@@ -6,6 +6,7 @@ import {
   migrateSecrets,
   PostgresRealtimeFanout,
   secretStoreOptionsFromEnv,
+  unwrapEnvFromKeyManager,
 } from "@anviq/adapters";
 import { resolveEncryptionKey } from "@anviq/core";
 import { loadRootEnv } from "@anviq/core/node/load-root-env";
@@ -13,6 +14,7 @@ import { createDb, runAsSystem } from "@anviq/db";
 import { createSecretMigrationRepository } from "../secret-migration.js";
 
 loadRootEnv();
+await unwrapEnvFromKeyManager();
 
 const args = process.argv.slice(2);
 if (args.some((arg) => !["--dry-run", "--reverse"].includes(arg)))

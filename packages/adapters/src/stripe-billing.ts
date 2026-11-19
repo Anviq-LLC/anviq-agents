@@ -9,8 +9,13 @@ import type {
   BillingSubscriptionSnapshot,
   BillingSubscriptionStatus,
 } from "@anviq/adapter-kit";
-import { BillingCheckoutCompletedError, BillingCustomerNotFoundError } from "@anviq/adapter-kit";
-import { ModelCreditAmountSchema } from "@anviq/contracts";
+import {
+  BillingCheckoutCompletedError,
+  BillingCustomerNotFoundError,
+  BillingNoMonthlyCreditsError,
+} from "@anviq/adapter-kit";
+import type { BillingCancellationReason } from "@anviq/contracts";
+import { BILLING_CANCELLATION_REASONS, ModelCreditAmountSchema } from "@anviq/contracts";
 import { z } from "zod";
 
 export const STRIPE_API_VERSION = "2026-09-30.endive";
@@ -44,17 +49,34 @@ const subscriptionSchema = z.object({
   metadata: z.record(z.string(), z.string()).optional(),
   created: z.number(),
   trial_end: z.number().nullish(),
+  current_period_start: z.number().nullish(),
   current_period_end: z.number().nullish(),
   cancel_at_period_end: z.boolean().nullish(),
   cancel_at: z.number().nullish(),
   ended_at: z.number().nullish(),
+  cancellation_details: z
+    .object({ feedback: z.string().nullish(), comment: z.string().nullish() })
+    .nullish(),
+  default_payment_method: z
+    .union([
+      z.string(),
+      z.object({ card: z.object({ fingerprint: z.string().nullish() }).nullish() }),
+    ])
+    .nullish(),
   items: z.object({
     data: z.array(
       z.object({
         id: z.string(),
         quantity: z.number().int().nullish(),
+        current_period_start: z.number().nullish(),
         current_period_end: z.number().nullish(),
-        price: idSchema.extend({ product: z.string().optional() }),
+        price: idSchema.extend({
+          product: z.string().optional(),
+          unit_amount: z.number().int().nullish(),
+          recurring: z
+            .object({ interval: z.string(), interval_count: z.number().int().nullish() })
+            .nullish(),
+        }),
       }),
     ),
   }),
@@ -94,7 +116,7 @@ export class StripeBillingProvider implements BillingProvider {
   private readonly apiBase: string;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
-  private readonly monthlyPrices = new Map<string, string>();
+  private readonly recurringPrices = new Map<string, string>();
 
   constructor(config: StripeBillingConfig) {
     this.config = config;
@@ -186,7 +208,7 @@ export class StripeBillingProvider implements BillingProvider {
           input.monthly
             ? {
                 quantity: 1,
-                price: await this.monthlyPrice(
+                price: await this.recurringPrice(
                   `anviq_monthly_credits_${input.amountCents}`,
                   input.amountCents,
                   "Anviq Agents monthly model credits",
@@ -221,15 +243,14 @@ export class StripeBillingProvider implements BillingProvider {
     );
     const item = subscription?.items.data[0];
     const previousAmount = creditAmount(subscription?.metadata?.anviq_credit_cents);
-    if (!subscription || !item || !previousAmount)
-      throw new Error("No monthly credit subscription");
+    if (!subscription || !item || !previousAmount) throw new BillingNoMonthlyCreditsError();
     if (amountCents === previousAmount) return;
     const upgrading = amountCents > previousAmount;
     await this.request("POST", `/v1/subscriptions/${encodeURIComponent(subscription.id)}`, {
       items: [
         {
           id: item.id,
-          price: await this.monthlyPrice(
+          price: await this.recurringPrice(
             `anviq_monthly_credits_${amountCents}`,
             amountCents,
             "Anviq Agents monthly model credits",
@@ -252,6 +273,7 @@ export class StripeBillingProvider implements BillingProvider {
     )
       throw new BillingCheckoutCompletedError();
     const metadata = { [BYOK_PLAN_METADATA]: "byok" };
+    const interval = input.interval ?? "month";
     const session = urlSchema.parse(
       await this.request("POST", "/v1/checkout/sessions", {
         customer: input.customerId,
@@ -262,11 +284,7 @@ export class StripeBillingProvider implements BillingProvider {
         line_items: [
           {
             quantity: 1,
-            price: await this.monthlyPrice(
-              `anviq_byok_monthly_${input.amountCents}`,
-              input.amountCents,
-              "Anviq Agents own-key plan",
-            ),
+            price: await this.byokPrice(input.amountCents, interval),
           },
         ],
         metadata,
@@ -280,6 +298,50 @@ export class StripeBillingProvider implements BillingProvider {
       }),
     );
     return { url: session.url };
+  }
+
+  async switchByokToYearly(customerId: string, subscriptionId: string, amountCents: number) {
+    // Re-read just before charging: a credit checkout may have completed since the caller checked.
+    const subscriptions = await this.listSubscriptions(customerId);
+    const live = (s: StripeSubscription) =>
+      holdsBillingSubscription(mapStripeSubscriptionStatus(s.status));
+    const subscription = subscriptions.find((s) => s.id === subscriptionId);
+    const item = subscription?.items.data[0];
+    const status = subscription && mapStripeSubscriptionStatus(subscription.status);
+    if (
+      !subscription ||
+      !item ||
+      !isByokPlan(subscription) ||
+      // Paid up and not cancelling: an overdue month must not be credited against the year.
+      (status !== "active" && status !== "trialing") ||
+      subscription.cancel_at_period_end ||
+      subscription.cancel_at != null ||
+      // One plan billed every month, as own-key checkout creates it.
+      subscription.items.data.length !== 1 ||
+      (item.quantity ?? 1) !== 1 ||
+      item.price.recurring?.interval !== "month" ||
+      (item.price.recurring.interval_count ?? 1) !== 1 ||
+      // Twelve months at the current price must still cost more than the year.
+      (item.price.unit_amount ?? 0) * 12 <= amountCents ||
+      subscriptions.some((s) => live(s) && creditAmount(s.metadata?.anviq_credit_cents))
+    )
+      return false;
+    // A new interval restarts the billing cycle today; the unused month is credited against it.
+    await this.request("POST", `/v1/subscriptions/${encodeURIComponent(subscription.id)}`, {
+      items: [{ id: item.id, price: await this.byokPrice(amountCents, "year"), quantity: 1 }],
+      proration_behavior: "always_invoice",
+      payment_behavior: "error_if_incomplete",
+    });
+    return true;
+  }
+
+  private byokPrice(amountCents: number, interval: "month" | "year") {
+    return this.recurringPrice(
+      `anviq_byok_${interval === "year" ? "yearly" : "monthly"}_${amountCents}`,
+      amountCents,
+      "Anviq Agents own-key plan",
+      interval,
+    );
   }
 
   async endByokPlans(customerId: string) {
@@ -301,22 +363,24 @@ export class StripeBillingProvider implements BillingProvider {
     }
   }
 
-  private async monthlyPrice(
+  private async recurringPrice(
     lookupKey: string,
     amountCents: number,
     productName: string,
+    interval: "month" | "year" = "month",
   ): Promise<string> {
-    const cached = this.monthlyPrices.get(lookupKey);
+    const cached = this.recurringPrices.get(lookupKey);
     if (cached) return cached;
-    const id = await this.findOrCreateMonthlyPrice(lookupKey, amountCents, productName);
-    this.monthlyPrices.set(lookupKey, id);
+    const id = await this.findOrCreateRecurringPrice(lookupKey, amountCents, productName, interval);
+    this.recurringPrices.set(lookupKey, id);
     return id;
   }
 
-  private async findOrCreateMonthlyPrice(
+  private async findOrCreateRecurringPrice(
     lookupKey: string,
     amountCents: number,
     productName: string,
+    interval: "month" | "year",
   ): Promise<string> {
     const query = encodeStripeForm({
       active: true,
@@ -337,7 +401,7 @@ export class StripeBillingProvider implements BillingProvider {
         price.product.active &&
         price.currency === "usd" &&
         price.unit_amount === amountCents &&
-        price.recurring.interval === "month" &&
+        price.recurring.interval === interval &&
         price.recurring.interval_count === 1,
     );
     if (existing) return existing.id;
@@ -346,7 +410,7 @@ export class StripeBillingProvider implements BillingProvider {
       await this.request("POST", "/v1/prices", {
         currency: "usd",
         unit_amount: amountCents,
-        recurring: { interval: "month" },
+        recurring: { interval },
         product_data: { name: productName },
         lookup_key: lookupKey,
         transfer_lookup_key: true,
@@ -562,6 +626,20 @@ export class StripeBillingProvider implements BillingProvider {
     }
   }
 
+  async endTrial(customerId: string) {
+    const chosen = pickStripeSubscription(await this.listLiveSubscriptions(customerId));
+    if (
+      chosen?.status !== "trialing" ||
+      toSnapshot(chosen.subscription, chosen.status).cancelAtPeriodEnd
+    )
+      return;
+    // Bills the first period now; a declined card fails the request and the trial runs on.
+    await this.request("POST", `/v1/subscriptions/${encodeURIComponent(chosen.subscription.id)}`, {
+      trial_end: "now",
+      payment_behavior: "error_if_incomplete",
+    });
+  }
+
   async cancelCustomerSubscriptions(customerId: string) {
     // First, so an abandoned checkout cannot start a subscription after the cancel.
     await this.expireOpenCheckouts(customerId).catch(ignoreDeletedCustomer);
@@ -574,6 +652,31 @@ export class StripeBillingProvider implements BillingProvider {
         await this.rethrowUnlessEnded(error, customerId, subscription.id);
       }
     }
+  }
+
+  async grantBalanceCredit(customerId: string, amountCents: number, referenceId: string) {
+    if (!Number.isSafeInteger(amountCents) || amountCents <= 0)
+      throw new Error("Invalid balance credit");
+    const path = `/v1/customers/${encodeURIComponent(customerId)}/balance_transactions`;
+    const granted = await this.listPages(
+      path,
+      z.object({ metadata: z.record(z.string(), z.string()).nullish() }),
+    );
+    if (granted.some((entry) => entry.metadata?.[BALANCE_REFERENCE_METADATA] === referenceId))
+      return;
+    // A fixed key only for this write: overlapping syncs must not both credit, and the lookup
+    // above covers retries after Stripe has forgotten the key.
+    await this.request(
+      "POST",
+      path,
+      {
+        amount: -amountCents,
+        currency: "usd",
+        description: "Referral reward",
+        metadata: { [BALANCE_REFERENCE_METADATA]: referenceId },
+      },
+      `anviq-balance-${referenceId}`,
+    );
   }
 
   parseWebhook(rawBody: string, headers: Headers) {
@@ -632,6 +735,7 @@ export class StripeBillingProvider implements BillingProvider {
         status: "all",
         limit: 100,
         starting_after: startingAfter,
+        expand: ["data.default_payment_method"],
       });
       const page = subscriptionListSchema.parse(
         await this.request("GET", `/v1/subscriptions?${query}`),
@@ -647,11 +751,12 @@ export class StripeBillingProvider implements BillingProvider {
     method: "GET" | "POST" | "DELETE",
     path: string,
     params?: Record<string, unknown> | string,
+    fixedIdempotencyKey?: string,
   ): Promise<unknown> {
     const body = typeof params === "string" ? params : params && encodeStripeForm(params);
     // One key per call: retries replay the first outcome, a later call starts fresh. Stripe
     // keeps a key's response, even a 500, for 24 hours, so a fixed key would wedge the call.
-    const idempotencyKey = method === "POST" ? randomUUID() : undefined;
+    const idempotencyKey = method === "POST" ? (fixedIdempotencyKey ?? randomUUID()) : undefined;
     for (let attempt = 0; ; attempt++) {
       const response = await this.fetchImpl(`${this.apiBase}${path}`, {
         method,
@@ -759,6 +864,10 @@ function toSnapshot(
 ): BillingSubscriptionSnapshot {
   const item = subscription.items.data[0];
   if (!item) throw new Error("Stripe subscription has no items");
+  const method = subscription.default_payment_method;
+  const fingerprint = typeof method === "object" ? method?.card?.fingerprint : undefined;
+  const reason = cancellationReason(subscription.cancellation_details?.feedback);
+  const comment = subscription.cancellation_details?.comment?.trim();
   return {
     creditAmountCents: creditAmount(subscription.metadata?.anviq_credit_cents),
     subscriptionId: subscription.id,
@@ -767,11 +876,32 @@ function toSnapshot(
     status,
     seats: item.quantity ?? 1,
     trialEndsAt: fromSeconds(subscription.trial_end),
+    currentPeriodStartsAt: fromSeconds(
+      item.current_period_start ?? subscription.current_period_start,
+    ),
     currentPeriodEndsAt: fromSeconds(item.current_period_end ?? subscription.current_period_end),
     cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end) || subscription.cancel_at != null,
     endedAt: fromSeconds(subscription.ended_at),
-    ...(isByokPlan(subscription) ? { byokPlan: true } : {}),
+    ...(isByokPlan(subscription)
+      ? {
+          byokPlan: true,
+          byokInterval: item.price.recurring?.interval === "year" ? "year" : "month",
+          ...(item.price.unit_amount != null
+            ? { byokPriceCents: item.price.unit_amount * (item.quantity ?? 1) }
+            : {}),
+        }
+      : {}),
+    ...(fingerprint ? { cardFingerprint: fingerprint } : {}),
+    ...(reason ? { cancellationReason: reason } : {}),
+    ...(comment ? { cancellationComment: comment } : {}),
   };
+}
+
+function cancellationReason(
+  feedback: string | null | undefined,
+): BillingCancellationReason | undefined {
+  if (!feedback) return undefined;
+  return BILLING_CANCELLATION_REASONS.find((reason) => reason === feedback) ?? "other";
 }
 
 function fromSeconds(value: number | null | undefined) {
@@ -874,6 +1004,7 @@ export function stripeBillingConfigFromEnv(env: {
 }
 
 const BYOK_PLAN_METADATA = "anviq_plan";
+const BALANCE_REFERENCE_METADATA = "anviq_reference";
 
 function isByokPlan(subscription: StripeSubscription) {
   return subscription.metadata?.[BYOK_PLAN_METADATA] === "byok";

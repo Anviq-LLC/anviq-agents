@@ -5,7 +5,12 @@ import { Prisma } from "@anviq/db";
 import { describe, expect, it, vi } from "vitest";
 import { querySpaceSearch } from "./search.js";
 
-const actor: Actor = { spaceId: "space-test", userId: "user-test" };
+const actor: Actor = {
+  spaceId: "space-test",
+  userId: "user-test",
+  email: "user@example.test",
+  isDeploymentOwner: false,
+};
 
 function fixture(count: number) {
   const artifacts = Array.from({ length: count }, (_, index) => ({
@@ -232,8 +237,8 @@ it("searches for the characters the user typed, not SQL wildcards", async () => 
 it("matches sealed bot text for the characters typed, not as a pattern", async () => {
   const { prisma } = fixture(0);
   prisma.bot.findMany.mockResolvedValue([
-    { id: "a", name: "Sale", title: null, description: "Save 50%_off today" },
-    { id: "b", name: "Other", title: null, description: "5000 off everything" },
+    { id: "a", name: "Sale", description: "Save 50%_off today" },
+    { id: "b", name: "Other", description: "5000 off everything" },
   ]);
   const hits = await querySpaceSearch(prisma as unknown as PrismaClient, actor, "50%_off");
 
@@ -257,8 +262,8 @@ it("JSON-escapes backslashes only for the message scan", async () => {
 it("guards name-derived snippets while preserving descriptions", async () => {
   const { prisma } = fixture(0);
   prisma.bot.findMany.mockResolvedValue([
-    { id: "bot-1", name: "__TestTok1__", title: "", description: "" },
-    { id: "bot-2", name: "__TestTok2__", title: "", description: "Keep __TestTok2__ literal" },
+    { id: "bot-1", name: "__TestTok1__", description: "" },
+    { id: "bot-2", name: "__TestTok2__", description: "Keep __TestTok2__ literal" },
   ] as never);
   prisma.chatGroup.findMany.mockResolvedValue([
     { id: "group-1", name: "__TestTok1__", _count: { members: 2 } },

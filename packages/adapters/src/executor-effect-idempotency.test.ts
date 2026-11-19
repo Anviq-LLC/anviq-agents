@@ -151,6 +151,8 @@ function fixture(runId = "run-1") {
     ),
   };
   const prisma = {
+    $transaction: vi.fn(async (write: (tx: unknown) => unknown) => write(prisma)),
+    $queryRaw: vi.fn(async () => []),
     user: { findUnique: vi.fn(async () => null) },
     run: {
       findUnique: vi.fn(async () => run),
@@ -203,6 +205,7 @@ function fixture(runId = "run-1") {
       })),
     },
     taughtSkill: { findMany: vi.fn(async () => []) },
+    secret: { findMany: vi.fn(async () => []) },
     vaultCredential: { findMany: vi.fn(async () => []) },
     agentSkill: { findMany: vi.fn(async () => []) },
     scratchpadItem: {
@@ -472,8 +475,8 @@ describe("mutating tool effect idempotency keys", () => {
     expect(f.results[0]).toEqual({ ok: true });
   });
 
-  it.each(["", "   ", "  MEMORY.md  "])(
-    "normalizes remember path %j before reading and committing",
+  it.each(["", "  MEMORY.md  ", "other.md", "bot"])(
+    "writes MEMORY.md whatever path %j the model passes",
     async (path) => {
       const f = fixture("run-path");
       f.memoryDocuments.push(

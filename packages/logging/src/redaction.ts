@@ -80,9 +80,23 @@ const BARE_SECRET_CANDIDATE = new RegExp(
   `${BARE_SECRET.source}|\\beyJ[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)?\\b`,
   "g",
 );
+// Profile paths leak the account name; leave later drive prefixes available for independent redaction.
+const WINDOWS_PROFILE = /[A-Z]:[\\/]Users[\\/](?:(?![A-Z]:[\\/])[^\\/\r\n])+/gi;
+const POSIX_PROFILE = /(?:\/Users\/|\/home\/)[^/\s]+/g;
+
+// A shared page's link is its only credential, in the API path and in the web page path, alone
+// or anywhere in text after an origin or a separator. The lookbehind runs only after a link path
+// matched and stops at the previous slash, so the scan stays linear.
+const PAGE_SHARE_LINK =
+  /(\/(?:api\/v1\/pages\/shared|p)\/)(?<=(?:^|[\s"'`(<=,;[{]|:\/\/[^/\s]*)\/(?:api\/v1\/pages\/shared|p)\/)[^/?#\s"'`<>()[\]{},;:]+/gi;
+// An unfinished quoted value consumes the rest of the text as well.
+const INVALID_HEADER_VALUE =
+  /Headers\.append: (\\?")[\s\S]*?(?:\1 is an invalid header value\.|$)/g;
 
 export function redactSensitiveText(text: string): string {
   return text
+    .replace(PAGE_SHARE_LINK, `$1${REDACTED}`)
+    .replace(INVALID_HEADER_VALUE, `Headers.append: $1${REDACTED}$1 is an invalid header value.`)
     .replace(EMAIL_CANDIDATE, (candidate) => (candidate.includes("@") ? REDACTED : candidate))
     .replace(JSON_SECRET_FIELD, `"$1":"${REDACTED}"`)
     .replace(BEARER, `Bearer ${REDACTED}`)
@@ -91,7 +105,9 @@ export function redactSensitiveText(text: string): string {
       candidate.startsWith("eyJ") && !candidate.includes(".")
         ? candidate.replace(BARE_SECRET, REDACTED)
         : REDACTED,
-    );
+    )
+    .replace(WINDOWS_PROFILE, "[user]")
+    .replace(POSIX_PROFILE, "/[user]");
 }
 
 function shouldRedactKey(key: string, value: unknown): boolean {

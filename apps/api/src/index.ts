@@ -1,8 +1,10 @@
 import type { Socket } from "node:net";
+import { unwrapEnvFromKeyManager } from "@anviq/adapters";
 import { loadRootEnv } from "@anviq/core/node/load-root-env";
 import { stopOnShutdownSignals } from "@anviq/core/node/shutdown-signals";
 
 loadRootEnv();
+await unwrapEnvFromKeyManager();
 
 import { SERVICE_NAMES } from "@anviq/logging";
 import { createRootLogger } from "@anviq/logging/axiom";
