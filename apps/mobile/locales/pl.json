@@ -1,0 +1,10 @@
+{
+  "ios": {
+    "NSCameraUsageDescription": "Anviq Agents korzysta z aparatu, aby umożliwić dołączanie zdjęć do wiadomości do bota.",
+    "NSPhotoLibraryUsageDescription": "Anviq Agents korzysta z biblioteki zdjęć, aby umożliwić dołączanie obrazów do wiadomości do bota.",
+    "NSLocalNetworkUsageDescription": "Anviq Agents łączy się z własnym serwerem Anviq Agents w Twojej sieci lokalnej.",
+    "NSMicrophoneUsageDescription": "Anviq Agents korzysta z mikrofonu podczas rozmów głosowych z botami.",
+    "NSSpeechRecognitionUsageDescription": "Anviq Agents zamienia Twoją mowę na wiadomości podczas rozmów głosowych.",
+    "NSFaceIDUsageDescription": "Zezwól Anviq Agents na korzystanie z Face ID."
+  }
+}

@@ -1,6 +1,6 @@
 // Copyright 2026 Anviq LLC. All rights reserved.
 import { linkBotIntoSpace, runAsTenant } from "@anviq/db";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Person } from "./team-harness.js";
 import { createTeamHarness } from "./team-harness.js";
 
@@ -233,19 +233,18 @@ describeWithDatabase("linked bots", () => {
     expect(runs).toHaveLength(1);
     expect(runs[0]).toMatchObject({ spaceId: harness.teamSpaceId, userId: ana.userId });
     const runId = runs[0]!.id;
-    let status = "";
-    let error: string | null = null;
-    for (let waited = 0; waited < 20_000; waited += 100) {
-      const run = await harness.db.run.findUniqueOrThrow({
-        where: { id: runId },
-        select: { status: true, error: true },
-      });
-      status = run.status;
-      error = run.error;
-      if (["completed", "failed", "cancelled"].includes(status)) break;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    expect({ status, error }).toEqual({ status: "completed", error: null });
+    const finished = await vi.waitFor(
+      async () => {
+        const run = await harness.db.run.findUniqueOrThrow({
+          where: { id: runId },
+          select: { status: true, error: true },
+        });
+        expect(["completed", "failed", "cancelled"]).toContain(run.status);
+        return run;
+      },
+      { timeout: 20_000, interval: 100 },
+    );
+    expect(finished).toEqual({ status: "completed", error: null });
     const reply = await harness.db.message.findFirst({
       where: { role: "bot", botId: linkId, thread: { groupId: mixedGroupId } },
       select: { id: true },

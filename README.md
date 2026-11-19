@@ -76,11 +76,11 @@ guide, [docs/self-host.md](./docs/self-host.md).
 
 Set `SANDBOX_PROVIDER` to one of:
 
-| Value | Notes |
-| --- | --- |
-| `docker` | Default. Docker computers on the same server, through the sandbox supervisor. |
-| `e2b`, `daytona`, `railway`, `boat`, `createos` | Remote providers. Each needs its own API key. |
-| `none` | No bot computers. |
+| Value                                           | Notes                                                                         |
+| ----------------------------------------------- | ----------------------------------------------------------------------------- |
+| `docker`                                        | Default. Docker computers on the same server, through the sandbox supervisor. |
+| `e2b`, `daytona`, `railway`, `boat`, `createos` | Remote providers. Each needs its own API key.                                 |
+| `none`                                          | No bot computers.                                                             |
 
 Provider details and isolation notes are in
 [docs/self-host-sandbox-providers.md](./docs/self-host-sandbox-providers.md) and

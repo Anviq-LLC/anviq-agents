@@ -1,8 +1,8 @@
-import type { PrismaClient } from "./client.js";
-import { ensureComputerRecord } from "./computers.js";
-import { OrganizationError } from "./organizations.js";
-import { runAsSystem } from "./row-security.js";
-import { lockSpaceForContentCreation } from "./spaces.js";
+import { ClientError } from "@anviq/core";
+import { ensureComputerRecord } from "./computers/computers.js";
+import type { PrismaClient } from "./database/client.js";
+import { runAsSystem } from "./database/row-security.js";
+import { lockSpaceForContentCreation } from "./spaces/spaces.js";
 
 /*
  * A person's bot takes part in a team space through a link: a thin bot row in that space that
@@ -83,9 +83,9 @@ export async function linkBotIntoSpace(
       select: { id: true, spaceId: true, name: true, color: true },
     });
     if (!original || original.spaceId === input.spaceId)
-      throw new OrganizationError("NOT_FOUND", "Bot not found");
+      throw new ClientError("NOT_FOUND", "Bot not found");
     if (!(await isTeamSpace(prisma, input.spaceId, actor.userId)))
-      throw new OrganizationError("NOT_FOUND", "Space not found");
+      throw new ClientError("NOT_FOUND", "Space not found");
     const existing = () =>
       prisma.bot.findFirst({
         where: { spaceId: input.spaceId, linkedFromBotId: original.id, archivedAt: null },
@@ -225,7 +225,7 @@ export async function resolveGroupBotIds(
       const link = await linkBotIntoSpace(prisma, actor, { botId, spaceId: actor.spaceId });
       replacement.set(botId, link.id);
     } catch (error) {
-      if (!(error instanceof OrganizationError && error.code === "NOT_FOUND")) throw error;
+      if (!(error instanceof ClientError && error.kind === "NOT_FOUND")) throw error;
     }
   }
   return botIds.map((botId) => replacement.get(botId) ?? botId);

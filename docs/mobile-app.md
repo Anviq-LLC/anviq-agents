@@ -4,7 +4,7 @@ Chat with your bots, answer their questions, watch their computers and take call
 
 ## Install
 
-- iPhone: [App Store](https://apps.apple.com/app/anviq/id6801531099).
+- iPhone, iPhone Duo and iPad: [App Store](https://apps.apple.com/app/anviq/id6801531099).
 - Android: [Google Play](https://play.google.com/store/apps/details?id=com.anviq.app).
 
 You can also choose **Get the mobile app** from the account menu in the web or desktop app.
@@ -14,6 +14,12 @@ You can also choose **Get the mobile app** from the account menu in the web or d
 Sign in with your anviq.net account. To use your own server instead, tap **Use a custom server** on
 the sign-in screen and enter its address. For a server on your local network, follow
 [Connecting a phone on the same network](./self-host-clients.md#connecting-a-phone-on-the-same-network).
+
+Custom servers you switch to or away from are listed on that screen, so you can switch back with
+one tap (the five most recent are kept, counting the one in use; press and hold one to remove it). The app is signed in to one server at a
+time: to use another, sign out, open the server screen from the sign-in screen and pick it, then
+sign in there. Changing the server signs the device out of the previous one, as described in
+[Apps and clients](./self-host-clients.md#connect-mobile-clients).
 
 ## What you can do
 
@@ -27,6 +33,10 @@ the sign-in screen and enter its address. For a server on your local network, fo
 The first time you send something, the app asks permission to share it with the AI services your
 server uses. Review or withdraw it later in **AI data sharing** in Settings.
 
+On an iPad, an unfolded iPhone Duo or an Android tablet, the chat list stays beside the open chat.
+
+Turn off **Haptics** in Settings if you don't want touch feedback.
+
 ## What stays on web and desktop
 
 - Creating or editing [routines](./routines.md). On mobile you can pause, delete and review them, or
@@ -39,8 +49,21 @@ server uses. Review or withdraw it later in **AI data sharing** in Settings.
 Bots notify you when they finish or need input, controlled per bot with
 **When it finishes or needs input** in its settings.
 
+On iOS, Live Activities show bots at work on the Lock Screen and in the Dynamic Island.
+They are unavailable with the App Store build connected to a self-hosted server; see
+[the APNs requirements](./self-host-clients.md#mobile-incoming-calls).
+
 On Android, **Notifications** in Settings also lets you choose which kinds you get, including a live
 working status while a bot runs.
+
+## Shortcuts and Siri
+
+On iPhone, Anviq Agents adds actions to Shortcuts, Siri and the Action button:
+
+- **Message Bot** and **Ask Bot**: send a message. Ask Bot also returns the reply.
+- **Record Message**: talk, then pause or press again to send it to the bot whose chat you opened last.
+  Progress shows in the Dynamic Island and on the Lock Screen.
+- **Open Bot**, **Start Voice Chat** and **Run Routine**.
 
 ## Share to a bot
 

@@ -13,6 +13,7 @@ class AnviqNotificationsModule : Module() {
   private var incomingReceiver: android.content.BroadcastReceiver? = null
   override fun definition() = ModuleDefinition {
     Name("AnviqNotifications")
+    Constants("supportsSenderAvatars" to true)
     Events("onIncomingCallChanged")
     OnStartObserving {
       val receiver = object : android.content.BroadcastReceiver() {
