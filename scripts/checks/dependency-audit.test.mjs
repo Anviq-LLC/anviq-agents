@@ -38,6 +38,11 @@ test("accepts complete multi-document and single-document audits", () => {
   });
 });
 
+test("skips external tarball and git package keys absent from npm audit totals", () => {
+  const withTarball = `${lockfile}  '@anviq/memory-engine@https://codeload.github.com/example/repo/tar.gz/abc': {}\n`;
+  checkAuditCoverage(withTarball, { metadata: { totalDependencies: 4 } });
+});
+
 test("missing inventory or report metadata cannot pass as clean", () => {
   assert.throws(() => checkAuditCoverage("", {}), /No lockfile package/);
   assert.throws(() => checkAuditCoverage(lockfile, {}), /Incomplete/);

@@ -46,7 +46,7 @@ export const INTEGRATION_PROVIDER_DESCRIPTORS: readonly IntegrationProviderDescr
     fields: [
       {
         key: "apiKey",
-        label: "API key",
+        label: "Composio API key",
         kind: "secret",
         required: true,
         maxLength: 16384,
@@ -59,21 +59,21 @@ export const INTEGRATION_PROVIDER_DESCRIPTORS: readonly IntegrationProviderDescr
     fields: [
       {
         key: "clientId",
-        label: "Client ID",
+        label: "Pipedream client ID",
         kind: "text",
         required: true,
         maxLength: 512,
       },
       {
         key: "clientSecret",
-        label: "Client secret",
+        label: "Pipedream client secret",
         kind: "secret",
         required: true,
         maxLength: 16384,
       },
       {
         key: "projectId",
-        label: "Project ID",
+        label: "Pipedream project ID",
         kind: "text",
         required: true,
         maxLength: 512,

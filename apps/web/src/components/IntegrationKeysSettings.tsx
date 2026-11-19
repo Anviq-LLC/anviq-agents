@@ -1,4 +1,5 @@
 import { Disclosure } from "@anviq/ui-web";
+import { useLingui } from "@lingui/react/macro";
 import { useQuery } from "@tanstack/react-query";
 import { useSave, useSpaceQueries } from "../lib/query/query";
 import { errorText } from "../lib/query/user-error";
@@ -6,6 +7,7 @@ import { ProviderSettingsForm } from "./models/ProviderSettingsForm";
 
 /** Each person connects apps with their own provider accounts, so these credentials are theirs alone. */
 export function IntegrationKeysSettings() {
+  const { t } = useLingui();
   const spaceQueries = useSpaceQueries();
   const state = useQuery(spaceQueries.integrationSetup.get.queryOptions());
   const save = useSave({
@@ -24,6 +26,7 @@ export function IntegrationKeysSettings() {
           fields={primary.fields ?? []}
           saved={primary.configured ? {} : undefined}
           busy={save.pending}
+          connectLabel={t`Save`}
           advancedSettings={null}
           onSubmit={(draft) =>
             save.run({
@@ -45,6 +48,7 @@ export function IntegrationKeysSettings() {
               fields={provider.fields ?? []}
               saved={provider.configured ? {} : undefined}
               busy={save.pending}
+              connectLabel={t`Save`}
               advancedSettings={null}
               onSubmit={(draft) =>
                 save.run({

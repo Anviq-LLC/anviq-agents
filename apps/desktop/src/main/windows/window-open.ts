@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { MCP_SIGNIN_WINDOW_PREFIX } from "@anviq/contracts";
 
 const OAUTH_POPUP_NAMES = new Set([
@@ -22,7 +22,7 @@ export function isMcpOAuthServerId(value: unknown): value is string {
 
 /** One persistent cookie jar per connected instance and server. */
 export function mcpOAuthPartition(appUrl: string, serverId: string) {
-  const digest = createHash("sha256")
+  const digest = createHmac("sha256", "anviq-mcp-partition")
     .update(JSON.stringify([new URL(appUrl).origin, serverId]))
     .digest("hex")
     .slice(0, 24);

@@ -82,7 +82,6 @@ export const Transcript = memo(function Transcript({
   loadingOlder,
   answerableAskIds,
   dismissableAskIds,
-  viewerUserId,
   running,
   workingBots,
   workingRoutine,
@@ -128,8 +127,6 @@ export const Transcript = memo(function Transcript({
   loadingOlder: boolean;
   answerableAskIds: Set<string>;
   dismissableAskIds: Set<string>;
-  /** Who is reading, so a shared chat names only the messages somebody else wrote. */
-  viewerUserId?: string;
   running: boolean;
   workingBots: GroupAvatarMember[];
   workingRoutine?: string;
@@ -685,11 +682,6 @@ export const Transcript = memo(function Transcript({
                           : message.role === "bot"
                             ? memberName?.(message.botId)
                             : undefined
-                      }
-                      senderName={
-                        message.role === "user" && message.author?.id !== viewerUserId
-                          ? message.author?.name
-                          : undefined
                       }
                       memberName={memberName}
                       peerBot={peerBot}

@@ -281,39 +281,39 @@ download_ref() {
     [[ -z "$image_tag" ]] || export ANVIQ_IMAGE_TAG="$image_tag"
     run_install "$tmp/$name" "$@" >/dev/null 2>&1
   ) || fail "$name install failed"
-  grep -F 'docker-compose.images.yml' "$tmp/$name/curl.log" | grep -oE 'anviq/[^/]+/infra/compose' | sort -u
+  grep -F 'docker-compose.images.yml' "$tmp/$name/curl.log" | grep -oE 'anviq-agents/[^/]+/infra/compose' | sort -u
 }
 ref="$(download_ref untagged "")"
-[[ "$ref" == "anviq/main/infra/compose" ]] || fail "no pin should use main, got: $ref"
+[[ "$ref" == "anviq-agents/main/infra/compose" ]] || fail "no pin should use main, got: $ref"
 ref="$(download_ref shell-pin v0.8.0)"
-[[ "$ref" == "anviq/v0.8.0/infra/compose" ]] || fail "shell pin should use its tag, got: $ref"
+[[ "$ref" == "anviq-agents/v0.8.0/infra/compose" ]] || fail "shell pin should use its tag, got: $ref"
 ref="$(download_ref shell-edge edge)"
-[[ "$ref" == "anviq/main/infra/compose" ]] || fail "edge should use main, got: $ref"
+[[ "$ref" == "anviq-agents/main/infra/compose" ]] || fail "edge should use main, got: $ref"
 ref="$(download_ref shell-custom v0.8.0-custom)"
-[[ "$ref" == "anviq/main/infra/compose" ]] || fail "a tag that is not a release should use main, got: $ref"
+[[ "$ref" == "anviq-agents/main/infra/compose" ]] || fail "a tag that is not a release should use main, got: $ref"
 
 setup_work "$tmp/env-pin"
 printf 'ANVIQ_IMAGE_TAG=edge\nexport ANVIQ_IMAGE_TAG="v0.7.0" # pinned\r\n' >> "$tmp/env-pin/cwd/.env"
 run_install "$tmp/env-pin" >/dev/null 2>&1 || fail "env-pin install failed"
-grep -qF 'anviq/v0.7.0/infra/compose/docker-compose.images.yml' "$tmp/env-pin/curl.log" ||
+grep -qF 'anviq-agents/v0.7.0/infra/compose/docker-compose.images.yml' "$tmp/env-pin/curl.log" ||
   fail ".env pin should use its tag: $(cat "$tmp/env-pin/curl.log")"
 
 setup_work "$tmp/shell-wins"
 printf 'ANVIQ_IMAGE_TAG=v0.7.0\n' >> "$tmp/shell-wins/cwd/.env"
 (export ANVIQ_IMAGE_TAG=v0.8.0; run_install "$tmp/shell-wins" >/dev/null 2>&1) || fail "shell-wins install failed"
-grep -qF 'anviq/v0.8.0/infra/compose/docker-compose.images.yml' "$tmp/shell-wins/curl.log" ||
+grep -qF 'anviq-agents/v0.8.0/infra/compose/docker-compose.images.yml' "$tmp/shell-wins/curl.log" ||
   fail "the shell should win over .env, as in Compose: $(cat "$tmp/shell-wins/curl.log")"
 
 setup_work "$tmp/env-spaces"
 printf "ANVIQ_IMAGE_TAG=v0.6.0\\nexport ANVIQ_IMAGE_TAG = 'v0.7.0'\\n" >> "$tmp/env-spaces/cwd/.env"
 run_install "$tmp/env-spaces" >/dev/null 2>&1 || fail "env-spaces install failed"
-grep -qF 'anviq/v0.7.0/infra/compose/docker-compose.images.yml' "$tmp/env-spaces/curl.log" ||
+grep -qF 'anviq-agents/v0.7.0/infra/compose/docker-compose.images.yml' "$tmp/env-spaces/curl.log" ||
   fail ".env pin with spaces should use its tag: $(cat "$tmp/env-spaces/curl.log")"
 
 setup_work "$tmp/shell-empty"
 printf 'ANVIQ_IMAGE_TAG=v0.7.0\n' >> "$tmp/shell-empty/cwd/.env"
 (export ANVIQ_IMAGE_TAG=; run_install "$tmp/shell-empty" >/dev/null 2>&1) || fail "shell-empty install failed"
-grep -qF 'anviq/main/infra/compose/docker-compose.images.yml' "$tmp/shell-empty/curl.log" ||
+grep -qF 'anviq-agents/main/infra/compose/docker-compose.images.yml' "$tmp/shell-empty/curl.log" ||
   fail "an empty shell value should win over .env, as in Compose: $(cat "$tmp/shell-empty/curl.log")"
 
 setup_work "$tmp/mirror"

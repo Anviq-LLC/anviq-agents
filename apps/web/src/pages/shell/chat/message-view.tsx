@@ -79,7 +79,6 @@ export const MessageView = memo(function MessageView({
   onRefresh,
   onBotChanged,
   onAddRoutine,
-  senderName,
   voiceReady,
   speaking,
   callHoldsSpeaker,
@@ -119,8 +118,6 @@ export const MessageView = memo(function MessageView({
   /** The adjacent receipts represented by this peer line. */
   peerExchange?: PeerExchange;
   speakerName?: string;
-  /** The person who wrote this message, when it is someone other than the viewer. */
-  senderName?: string;
   memberName?: (botId: string | undefined) => string | undefined;
   peerBot: (
     botId: string,
@@ -229,11 +226,6 @@ export const MessageView = memo(function MessageView({
           dir="auto"
         >
           {author.name}
-        </div>
-      ) : null}
-      {senderName ? (
-        <div className="mb-1 text-end text-[13px] font-medium text-muted-foreground" dir="auto">
-          {senderName}
         </div>
       ) : null}
       <ReplyLine

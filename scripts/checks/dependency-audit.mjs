@@ -10,7 +10,12 @@ export function checkAuditCoverage(lockfile, report) {
     let count = 0;
     for (const line of document.split("\n")) {
       if (/^\S/.test(line)) inPackages = line.trim() === "packages:";
-      else if (inPackages && /^ {2}\S/.test(line)) count++;
+      else if (
+        inPackages &&
+        /^ {2}\S/.test(line) &&
+        !/^ {2}'?[^:\n]+@(?:https?:|git\+|file:|github:)/.test(line)
+      )
+        count++;
     }
     return count;
   });

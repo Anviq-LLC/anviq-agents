@@ -194,12 +194,15 @@ export function ProviderSettingsForm({
   fields,
   saved,
   busy,
+  connectLabel,
   advancedSettings,
   onSubmit,
 }: {
   fields: readonly ProviderSettingsField[];
   saved?: Record<string, string>;
   busy: boolean;
+  /** Button label when creating a connection; defaults to Connect. */
+  connectLabel?: string;
   /** Shown first in the advanced section, ahead of the provider's own advanced fields. */
   advancedSettings: ReactNode;
   onSubmit: (draft: ProviderSettingsDraft) => void;
@@ -312,7 +315,7 @@ export function ProviderSettingsForm({
         ) : busy ? (
           <Trans>Connecting…</Trans>
         ) : (
-          <Trans>Connect</Trans>
+          (connectLabel ?? <Trans>Connect</Trans>)
         )}
       </Button>
     </>

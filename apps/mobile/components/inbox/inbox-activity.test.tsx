@@ -120,5 +120,12 @@ it.each([
       openChat: () => undefined,
     }),
   );
-  expect(markup.replace(/<[^>]+>/g, "")).toBe(text);
+  let plain = "";
+  let inTag = false;
+  for (const ch of markup) {
+    if (ch === "<") inTag = true;
+    else if (ch === ">") inTag = false;
+    else if (!inTag) plain += ch;
+  }
+  expect(plain).toBe(text);
 });
