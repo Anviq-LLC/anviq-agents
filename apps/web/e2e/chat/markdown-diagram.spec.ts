@@ -32,6 +32,17 @@ async function expectDrawn(page: Page) {
   return image;
 }
 
+function stripMarkupTags(markup: string): string {
+  let out = "";
+  let inTag = false;
+  for (const ch of markup) {
+    if (ch === "<") inTag = true;
+    else if (ch === ">") inTag = false;
+    else if (!inTag) out += ch;
+  }
+  return out;
+}
+
 test("a mermaid fence is drawn as a themed, copyable diagram in place of its code block", async ({
   page,
 }, testInfo) => {
@@ -47,7 +58,7 @@ test("a mermaid fence is drawn as a themed, copyable diagram in place of its cod
   expect(text.indexOf("Here is the contribution flow:")).toBeLessThan(
     text.indexOf("Each step runs in CI."),
   );
-  const drawnText = (await diagramMarkup(page)).replace(/<[^>]+>/g, "");
+  const drawnText = stripMarkupTags(await diagramMarkup(page));
   for (const label of ["Clone repo", "Branch", "Tests", "Pull request"]) {
     expect(drawnText).toContain(label);
   }

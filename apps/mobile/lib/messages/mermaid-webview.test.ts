@@ -12,12 +12,11 @@ import {
 
 const config = chatMermaidConfig(darkTokens, "dark", { surface: darkTokens.background });
 
+const CSP_ENTITIES: Record<string, string> = { "&quot;": '"', "&amp;": "&", "&lt;": "<" };
+
 function policyOf(html: string) {
   const content = /http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(html)?.[1] ?? "";
-  return content
-    .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<");
+  return content.replace(/&(quot|amp|lt);/g, (entity) => CSP_ENTITIES[entity]!);
 }
 
 describe("diagram WebView document", () => {

@@ -118,7 +118,14 @@ export function PluginRow({
 
 function sourceHref(source: string, sha: string | undefined) {
   const [repo, subdir] = source.split("#");
-  return subdir ? `${repo}/tree/${sha ?? "HEAD"}/${subdir}` : repo;
+  if (!repo) return undefined;
+  const candidate = subdir ? `${repo}/tree/${sha ?? "HEAD"}/${subdir}` : repo;
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 const SKILLS_SHOWN = 5;

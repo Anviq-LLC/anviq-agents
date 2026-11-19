@@ -184,13 +184,11 @@ test("live page helper waits for a site's sign-in check, or says the page is sti
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://fixture.test");
     if (url.pathname === "/api/me") {
-      setTimeout(
-        () => {
-          res.setHeader("content-type", "application/json");
-          res.end('{"name":"test-user"}');
-        },
-        Number(url.searchParams.get("delay")),
-      );
+      const delay = url.searchParams.get("delay") === "20000" ? 20_000 : 500;
+      setTimeout(() => {
+        res.setHeader("content-type", "application/json");
+        res.end('{"name":"test-user"}');
+      }, delay);
       return;
     }
     res.setHeader("content-type", "text/html");
