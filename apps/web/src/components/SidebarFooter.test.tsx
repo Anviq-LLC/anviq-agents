@@ -141,11 +141,13 @@ it("opens integrations and keeps the existing account actions and links", async 
   expect(onIntegrations).toHaveBeenCalledOnce();
   const menu = document.querySelector('[data-slot="popover-content"]')!;
   expect([...menu.querySelectorAll("button, a")].map((row) => row.textContent)).toEqual([
-    "Skills",
-    "Usage",
-    "Board",
-    "Artifacts",
     "Settings",
+    "Skills",
+    "Artifacts",
+    "Board",
+    "Usage",
+    "Get the mobile app",
+    "Docs",
     "Log out",
   ]);
   expect(host.querySelector('[data-testid="user-menu-trigger"]')?.getAttribute("aria-label")).toBe(
@@ -157,6 +159,15 @@ it("omits Board when unavailable", async () => {
   expect(document.querySelector('[data-slot="popover-content"]')?.textContent).not.toContain(
     "Board",
   );
+});
+
+it("offers Google Play on Android", async () => {
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Android");
+  await render();
+  const mobile = [...document.querySelectorAll("a")].find(
+    (link) => link.textContent === "Get the mobile app",
+  )!;
+  expect(mobile.href).toBe("https://play.google.com/store/apps/details?id=com.anviq.app");
 });
 
 it("falls back when app artwork fails and accepts replacement artwork", async () => {

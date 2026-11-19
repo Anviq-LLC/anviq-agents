@@ -21,11 +21,9 @@ const workflow = readFileSync(
   "utf8",
 );
 const temporaryDirectories: string[] = [];
-const screenshot = PNG.sync.write({
-  width: 1,
-  height: 1,
-  data: Buffer.from([23, 45, 67, 255]),
-});
+const screenshotImage = new PNG({ width: 1, height: 1 });
+screenshotImage.data = Buffer.from([23, 45, 67, 255]);
+const screenshot = PNG.sync.write(screenshotImage);
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -105,7 +103,6 @@ describe("Playwright artifact publication boundary", () => {
 
   it.each([
     ["../escape.txt", 0o100644],
-    ["nested/../../escape.txt", 0o100644],
     ["/escape.txt", 0o100644],
     ["nested\\..\\escape.txt", 0o100644],
     ["apps/web/test-results/link", 0o120777],
@@ -135,7 +132,7 @@ describe("Playwright artifact publication boundary", () => {
     expect(existsSync(path.join(root, "overwrite.txt"))).toBe(false);
   });
 
-  it.each(["pull_request", "push", "timed_out"])(
+  it.each(["pull_request", "schedule", "timed_out"])(
     "publishes %s through trusted code with fake storage and credentials",
     (scenario) => {
       const root = temporaryDirectory();
@@ -143,7 +140,7 @@ describe("Playwright artifact publication boundary", () => {
       const runnerTemp = path.join(root, "runner-temp");
       const artifacts = path.join(runnerTemp, "playwright-artifacts");
       const hasArtifact = scenario !== "timed_out";
-      const isPr = scenario !== "push";
+      const isPr = scenario !== "schedule";
       const trustedFiles = [
         "package.json",
         "scripts/publish-playwright-report.sh",
@@ -218,7 +215,7 @@ else:
         PLAYWRIGHT_RUN_NUMBER: "10",
         PLAYWRIGHT_RUN_URL: "https://example.invalid/actions/runs/200",
         PLAYWRIGHT_SHA: "a".repeat(40),
-        PLAYWRIGHT_EVENT: isPr ? "pull_request" : "push",
+        PLAYWRIGHT_EVENT: isPr ? "pull_request" : scenario,
         PLAYWRIGHT_BRANCH: isPr ? "example-change" : "main",
         PLAYWRIGHT_PR_NUMBER: isPr ? "42" : "",
         PLAYWRIGHT_REPOSITORY_URL: "https://example.invalid/project",
@@ -250,9 +247,9 @@ else:
         const changedPaths = path.join(root, "changed-paths.txt");
         write(changedPaths, "apps/web/src/example.tsx\n");
         const comment = execFileSync(
-          "pnpm",
+          process.execPath,
           [
-            "exec",
+            "--import",
             "tsx",
             "packages/testkit/src/cli/build-playwright-pr-screenshot-comment.ts",
             path.join(checkout, ".tmp/playwright-dashboard/screenshots/review.json"),

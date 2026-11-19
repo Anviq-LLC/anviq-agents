@@ -19,6 +19,10 @@ function matches(row: Row, where: Where) {
   return Object.entries(where).every(([key, value]) => {
     const field = row[key as keyof Row];
     if (value && typeof value === "object" && "not" in value) return field !== value.not;
+    if (value && typeof value === "object" && "path" in value) {
+      const filter = value as { path: string[]; equals: unknown };
+      return (field as Record<string, unknown> | null)?.[filter.path[0]!] === filter.equals;
+    }
     return field === value;
   });
 }
@@ -63,7 +67,7 @@ export function fakeDatabase() {
           ownVaults.has(where.spaceId_userId_setting.spaceId) ? { setting: "credentials" } : null,
       ),
     },
-    secret: { count: vi.fn(async () => 0) },
+    secret: { count: vi.fn(async () => 0), findFirst: vi.fn(async () => null) },
     // The previous release's table, still counted before a stored value is deleted.
     botSecret: { count: vi.fn(async () => 0) },
     integrationProviderConfig: { count: vi.fn(async () => 0) },

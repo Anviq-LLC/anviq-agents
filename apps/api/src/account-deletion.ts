@@ -1,12 +1,14 @@
 import type { AdapterContext } from "@anviq/adapter-kit";
 import {
   destroyBot,
+  forgetPageShareSecrets,
   removeAgentHome,
   removeDeletedBotsFromLegacyTeamHome,
   toComputerRef,
 } from "@anviq/adapters";
 import {
   claimSpacesLeavingWithAccount,
+  deletePageShareSecrets,
   deleteSpaceLeavingWithAccount,
   recordComputerRunEnd,
 } from "@anviq/db";
@@ -48,7 +50,7 @@ export async function deleteAccountContent(
   });
   await settleAll(
     bots.map((bot) =>
-      destroyBot(deps, bot, context(bot.spaceId, bot.id), {
+      destroyBot({ ...deps, secretStore: deps.secrets }, bot, context(bot.spaceId, bot.id), {
         deleteMemories: true,
         strictTeardown: true,
       }),
@@ -102,6 +104,12 @@ export async function deleteAccountContent(
     }),
   );
 
+  // Pages in Spaces that stay go with the user row; their links' tokens leave the store now.
+  const memberPageSecrets = await deps.prisma.$transaction((tx) =>
+    deletePageShareSecrets(tx, { userId, spaceId: { notIn: leaving } }),
+  );
+  if (deps.secrets) await forgetPageShareSecrets(deps.secrets, memberPageSecrets);
+
   for (const spaceId of leaving) {
     const deleted = await deleteSpaceLeavingWithAccount(deps.prisma, { spaceId, userId });
     if (!deleted) continue;
@@ -111,6 +119,7 @@ export async function deleteAccountContent(
     for (const result of cleanup) {
       if (result.status === "rejected") getLogger().error("space file cleanup", result.reason);
     }
+    if (deps.secrets) await forgetPageShareSecrets(deps.secrets, deleted.pageShareSecrets);
   }
 }
 

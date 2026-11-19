@@ -1,5 +1,10 @@
 import type { ReplyPreview, ThreadMessage } from "@anviq/contracts";
-import { formatTimeSeparator, isPeerReceiptBlocks, replyLabel } from "@anviq/core";
+import {
+  formatTimeSeparator,
+  isPageOriginReply,
+  isPeerReceiptBlocks,
+  replyLabel,
+} from "@anviq/core";
 import { cn } from "@anviq/ui-web";
 import { useLingui } from "@lingui/react/macro";
 import { X } from "lucide-react";
@@ -106,7 +111,12 @@ export function ComposerReplyPreview({
   const { t } = useLingui();
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) {
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        !event.isComposing &&
+        event.keyCode !== 229
+      ) {
         event.preventDefault();
         onDismiss();
       }
@@ -153,7 +163,7 @@ export function ReplyLine({
 }) {
   const { t } = useLingui();
   // Peer receipts use internal reply links for routing; their bodies belong in the peer view.
-  if (isPeerReceiptBlocks(message.blocks)) return null;
+  if (isPeerReceiptBlocks(message.blocks) || isPageOriginReply(message)) return null;
   if (!message.replyToMessageId && message.replyQuote == null) return null;
   const unavailable = message.replyPreview === null || !message.replyToMessageId;
   if (unavailable)

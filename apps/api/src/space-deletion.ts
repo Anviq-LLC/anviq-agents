@@ -4,8 +4,14 @@ import type {
   ArtifactStore,
   JobPublisher,
   SandboxProvider,
+  SecretStore,
 } from "@anviq/adapter-kit";
-import { destroyBot, removeAgentHome, toComputerRef } from "@anviq/adapters";
+import {
+  destroyBot,
+  forgetPageShareSecrets,
+  removeAgentHome,
+  toComputerRef,
+} from "@anviq/adapters";
 import type { Actor } from "@anviq/contracts";
 import type { PrismaClient } from "@anviq/db";
 import {
@@ -20,6 +26,7 @@ import {
   SpaceDeletionInProgressError,
 } from "@anviq/db";
 import { getLogger } from "@anviq/logging";
+import { rehomeItemsLeaving } from "./availability.js";
 
 /** Bound for one bot or sandbox teardown. Providers may ignore the abort signal,
  * so without a deadline a hung destroy would keep the deletion claim renewed
@@ -40,6 +47,8 @@ export type SpaceDeletionDeps = {
   dataDir: string;
   memoryProviders?: Parameters<typeof destroyBot>[0]["memoryProviders"];
   messagingInstallations?: Parameters<typeof destroyBot>[0]["messagingInstallations"];
+  /** Removes deleted page links' tokens from a remote secret store. */
+  secrets?: Pick<SecretStore, "delete">;
 };
 
 /** The owner-only rules live in the db layer. A worker that dies mid-way leaves the Space
@@ -124,7 +133,7 @@ export async function deleteSpaceWithContent(
       try {
         await teardown(
           () =>
-            destroyBot(deps, bot, context(bot.id), {
+            destroyBot({ ...deps, secretStore: deps.secrets }, bot, context(bot.id), {
               deleteMemories: true,
               strictTeardown: true,
             }),
@@ -163,6 +172,7 @@ export async function deleteSpaceWithContent(
       clearInterval(claimRenewal);
       claimRenewal = null;
     }
+    await rehomeItemsLeaving(deps.prisma, spaceId);
     const deleted = await deleteClaimedSpaceForMember(deps.prisma, claimedInput);
     await deps.memoryProviders?.purgeSpace?.(spaceId).catch((error) => {
       getLogger().error("space memory purge failed", error);
@@ -175,6 +185,7 @@ export async function deleteSpaceWithContent(
     for (const result of cleanup) {
       if (result.status === "rejected") getLogger().error("space file cleanup", result.reason);
     }
+    if (deps.secrets) await forgetPageShareSecrets(deps.secrets, deleted.pageShareSecrets);
     return { activeSpaceId: deleted.id };
   } catch (error) {
     if (signal?.aborted) claimReleasable = false;

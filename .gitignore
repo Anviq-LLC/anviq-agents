@@ -45,7 +45,6 @@ PRODUCT_PLAN.md
 apps/web/src/locales/**/*.mjs
 apps/web/src/locales/**/*.js
 apps/web/scripts/msgids.json
-
 # Graphify: ignore anywhere except root outputs for this repo
 **/graphify-out/
 !/graphify-out/
@@ -53,3 +52,9 @@ apps/web/scripts/msgids.json
 /graphify-out/.graphify_*
 /graphify-out/.needs_update
 /graphify-out/transcripts/
+
+playwright-report-www
+
+# Downloaded embedded computer screen SDK files
+apps/web/public/computer-screen/*.js
+apps/web/public/computer-screen/sdk/

@@ -1,7 +1,16 @@
 import type { NavLink } from "@anviq/contracts";
-import { AppMarkStack, Button, Popover, PopoverContent, PopoverTrigger } from "@anviq/ui-web";
+import { ANDROID_APP_STORE_URL, IOS_APP_STORE_URL } from "@anviq/contracts";
+import {
+  AppMarkStack,
+  Button,
+  buttonVariants,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@anviq/ui-web";
 import { Trans, useLingui } from "@lingui/react/macro";
 import {
+  BookOpen,
   Check,
   Download,
   FolderOpen,
@@ -11,7 +20,9 @@ import {
   Plug,
   ScrollText,
   Settings,
+  Smartphone,
   SquareKanban,
+  UserPlus,
   UserRound,
 } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
@@ -36,6 +47,7 @@ type Props = {
   onArtifacts: () => void;
   onSettings: () => void;
   onUsage: () => void;
+  onInvite?: () => void;
   onLogOut: () => void;
   signingOut: boolean;
   logOutError: string | null;
@@ -64,6 +76,7 @@ export function SidebarFooter({
   onArtifacts,
   onSettings,
   onUsage,
+  onInvite,
   onLogOut,
   signingOut,
   logOutError,
@@ -164,6 +177,15 @@ export function SidebarFooter({
             <Button
               variant="ghost"
               className="h-9 w-full justify-start gap-2.5 font-normal"
+              aria-label={t`Settings`}
+              onClick={onSettings}
+            >
+              <Settings className="text-muted-foreground" strokeWidth={1.75} />
+              <Trans>Settings</Trans>
+            </Button>
+            <Button
+              variant="ghost"
+              className="h-9 w-full justify-start gap-2.5 font-normal"
               onClick={onSkills}
             >
               <ScrollText className="text-muted-foreground" strokeWidth={1.75} />
@@ -172,10 +194,10 @@ export function SidebarFooter({
             <Button
               variant="ghost"
               className="h-9 w-full justify-start gap-2.5 font-normal"
-              onClick={onUsage}
+              onClick={onArtifacts}
             >
-              <Gauge className="text-muted-foreground" strokeWidth={1.75} />
-              <Trans>Usage</Trans>
+              <FolderOpen className="text-muted-foreground" strokeWidth={1.75} />
+              <Trans>Artifacts</Trans>
             </Button>
             {onBoard ? (
               <Button
@@ -201,20 +223,42 @@ export function SidebarFooter({
             <Button
               variant="ghost"
               className="h-9 w-full justify-start gap-2.5 font-normal"
-              onClick={onArtifacts}
+              onClick={onUsage}
             >
-              <FolderOpen className="text-muted-foreground" strokeWidth={1.75} />
-              <Trans>Artifacts</Trans>
+              <Gauge className="text-muted-foreground" strokeWidth={1.75} />
+              <Trans>Usage</Trans>
             </Button>
-            <Button
-              variant="ghost"
-              className="h-9 w-full justify-start gap-2.5 font-normal"
-              aria-label={t`Settings`}
-              onClick={onSettings}
+            <div className="my-1 border-t border-border" />
+            <a
+              className={`${buttonVariants({ variant: "ghost" })} h-9 w-full justify-start gap-2.5 font-normal`}
+              href={
+                /Android/i.test(navigator.userAgent) ? ANDROID_APP_STORE_URL : IOS_APP_STORE_URL
+              }
+              target="_blank"
+              rel="noreferrer"
             >
-              <Settings className="text-muted-foreground" strokeWidth={1.75} />
-              <Trans>Settings</Trans>
-            </Button>
+              <Smartphone className="text-muted-foreground" strokeWidth={1.75} />
+              <Trans>Get the mobile app</Trans>
+            </a>
+            {onInvite ? (
+              <Button
+                variant="ghost"
+                className="h-9 w-full justify-start gap-2.5 font-normal"
+                onClick={onInvite}
+              >
+                <UserPlus className="text-muted-foreground" strokeWidth={1.75} />
+                <Trans>Invite friends</Trans>
+              </Button>
+            ) : null}
+            <a
+              className={`${buttonVariants({ variant: "ghost" })} h-9 w-full justify-start gap-2.5 font-normal`}
+              href="https://github.com/leovoss/anviq-agents/blob/main/docs/self-host.md"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <BookOpen className="text-muted-foreground" strokeWidth={1.75} />
+              <Trans>Docs</Trans>
+            </a>
             <div className="my-1 border-t border-border" />
             <Button
               variant="ghost"

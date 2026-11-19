@@ -30,7 +30,7 @@ function loginOf(url: string): string {
 }
 
 export const SINGLE_DATABASE_URL_WARNING =
-  "DATABASE_URL is used for both migrations and the app, so row-level security is not enforced. Set DATABASE_MIGRATION_URL to the owner role and DATABASE_URL to a runtime login (docs/self-host.md#database-roles).";
+  "DATABASE_URL is used for both migrations and the app, so row-level security is not enforced. Set DATABASE_MIGRATION_URL to the owner role and DATABASE_URL to a runtime login (docs/self-host-configuration.md#database-roles).";
 
 /**
  * Create or update the runtime login named in `runtimeUrl` and give it the
@@ -92,6 +92,7 @@ async function provisionWith(owner: Client, runtimeUrl: string): Promise<{ warni
     GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${RUNTIME_ROLE};
     REVOKE ALL ON TABLE "_prisma_migrations" FROM ${RUNTIME_ROLE};
     REVOKE UPDATE ON TABLE "security_events" FROM ${RUNTIME_ROLE};
+    REVOKE UPDATE ON TABLE "audit_events" FROM ${RUNTIME_ROLE};
     ALTER DEFAULT PRIVILEGES IN SCHEMA public
       GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${RUNTIME_ROLE};
     ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${RUNTIME_ROLE};
@@ -305,5 +306,5 @@ export function rowSecurityWarning(status: RowSecurityStatus): string | undefine
   if (status.systemBlocked)
     return "Background work across Spaces is blocked: DATABASE_URL's password changed since `pnpm db:migrate` last ran. Run it again.";
   if (status.enforced) return undefined;
-  return `Row-level security is not enforced: the app connects as ${status.role}, which ${status.reason}. Point DATABASE_URL at a runtime login and DATABASE_MIGRATION_URL at the owner (docs/self-host.md#database-roles).`;
+  return `Row-level security is not enforced: the app connects as ${status.role}, which ${status.reason}. Point DATABASE_URL at a runtime login and DATABASE_MIGRATION_URL at the owner (docs/self-host-configuration.md#database-roles).`;
 }

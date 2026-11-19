@@ -102,6 +102,7 @@ function within<T>(context: DbContext, fn: () => T | PromiseLike<T>): Promise<T>
 export const ROW_SECURITY_MODELS: ReadonlySet<string> = new Set([
   "BillingAuditEvent",
   "PushToken",
+  "CallPushDevice",
   "EmailSend",
   "Thread",
   "Message",
@@ -116,10 +117,14 @@ export const ROW_SECURITY_MODELS: ReadonlySet<string> = new Set([
   "UserModelCredential",
   "UserVoiceCredential",
   "UserIntegrationProviderConfig",
+  "TrustedLinkSite",
+  "FeedbackReport",
   "PaymentWallet",
   "Purchase",
   "TaughtSkill",
   "AgentSkill",
+  "AgentSkillSpace",
+  "CapabilityInstallSpace",
   "AgentImport",
   "Bot",
   "Run",
@@ -127,6 +132,7 @@ export const ROW_SECURITY_MODELS: ReadonlySet<string> = new Set([
   "Routine",
   "Connection",
   "McpServer",
+  "McpServerSpace",
   "McpOAuthSession",
   "ModelOAuthSession",
   "BotMcpServer",
@@ -154,6 +160,9 @@ export const ROW_SECURITY_MODELS: ReadonlySet<string> = new Set([
   "UserActionAutoReviewPreference",
   "SecurityEvent",
   "ChatGroupParticipant",
+  "AuditEvent",
+  "Page",
+  "PageVersion",
 ]);
 
 /**

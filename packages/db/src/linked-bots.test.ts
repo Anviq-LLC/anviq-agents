@@ -51,7 +51,6 @@ describe("withLinkedBotHome", () => {
     id: "link",
     userId: "owner",
     linkedFromBotId: "home",
-    selfUpdateInstructions: true,
     instructions: "",
     modelProvider: null,
     modelId: null,
@@ -61,7 +60,7 @@ describe("withLinkedBotHome", () => {
   const prismaWith = (home: unknown) =>
     ({ bot: { findFirst: vi.fn(async () => home) } }) as unknown as PrismaClient;
 
-  it("answers with the persona and model of the bot behind the link, and never rewrites it", async () => {
+  it("answers with the persona and model of the bot behind the link", async () => {
     const prisma = prismaWith({
       instructions: "Be brief.",
       modelProvider: "p",
@@ -76,7 +75,6 @@ describe("withLinkedBotHome", () => {
       modelId: "m",
       thinkingLevel: "low",
       disabledBuiltinTools: ["shell"],
-      selfUpdateInstructions: false,
     });
   });
 

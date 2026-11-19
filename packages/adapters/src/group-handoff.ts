@@ -19,9 +19,10 @@ import {
 } from "@anviq/db";
 import { getLogger } from "@anviq/logging";
 import type { ExecutorDeps } from "./executor-deps.js";
+import { runLeaseFor } from "./run-messages.js";
 
 export async function handoffToGroupBot(
-  deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
+  deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs" | "runLease">,
   run: {
     id: string;
     spaceId: string;
@@ -171,6 +172,7 @@ export async function handoffToGroupBot(
       botId: run.botId,
       runId: inGroup ? run.id : undefined,
       clientNonce: deliveryKey,
+      lease: inGroup ? runLeaseFor(deps, run.id) : undefined,
     });
     // The next bot acts for its own owner; when that is someone else, the source's owner is asking.
     const targetOwner = target.userId;
@@ -203,6 +205,7 @@ export async function handoffToGroupBot(
       botId: run.botId,
       type: "group.handoff",
       runId: inGroup ? run.id : undefined,
+      lease: inGroup ? runLeaseFor(deps, run.id) : undefined,
       payload: {
         messageId: message.id,
         fromBotId: run.botId,
@@ -252,7 +255,7 @@ export async function loadGroupContext(
       members: {
         where: { bot: { archivedAt: null } },
         include: {
-          bot: { select: { id: true, name: true, title: true, description: true } },
+          bot: { select: { id: true, name: true, description: true } },
         },
         orderBy: { createdAt: "asc" },
       },

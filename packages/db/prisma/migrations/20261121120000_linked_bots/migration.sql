@@ -37,16 +37,16 @@ $$;
 CREATE TRIGGER bots_check_link BEFORE INSERT OR UPDATE OF "linkedFromBotId", "userId", "spaceId" ON "bots"
 FOR EACH ROW EXECUTE FUNCTION bots_check_link();
 
--- What the team sees of a linked bot follows the original: its name, title and look, and archiving
+-- What the team sees of a linked bot follows the original: its name and look, and archiving
 -- it. Descriptions and instructions are sealed under their own space's key and stay with the
 -- original, as does everything else.
 CREATE FUNCTION bots_sync_links() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, public AS $$
 BEGIN
   UPDATE bots
-     SET name = NEW.name, title = NEW.title, color = NEW.color, "updatedAt" = now()
+     SET name = NEW.name, color = NEW.color, "updatedAt" = now()
    WHERE "linkedFromBotId" = NEW.id
-     AND (name, title, color) IS DISTINCT FROM (NEW.name, NEW.title, NEW.color);
+     AND (name, color) IS DISTINCT FROM (NEW.name, NEW.color);
   IF NEW."archivedAt" IS NOT NULL AND OLD."archivedAt" IS NULL THEN
     UPDATE bots SET "archivedAt" = NEW."archivedAt"
      WHERE "linkedFromBotId" = NEW.id AND "archivedAt" IS NULL;
@@ -54,5 +54,5 @@ BEGIN
   RETURN NULL;
 END;
 $$;
-CREATE TRIGGER bots_sync_links AFTER UPDATE OF name, title, color, "archivedAt" ON "bots"
+CREATE TRIGGER bots_sync_links AFTER UPDATE OF name, color, "archivedAt" ON "bots"
 FOR EACH ROW WHEN (NEW."linkedFromBotId" IS NULL) EXECUTE FUNCTION bots_sync_links();

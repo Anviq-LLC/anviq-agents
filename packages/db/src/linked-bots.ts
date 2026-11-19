@@ -80,7 +80,7 @@ export async function linkBotIntoSpace(
   return runAsSystem("link a person's own bot into a team space", async () => {
     const original = await prisma.bot.findFirst({
       where: { id: input.botId, userId: actor.userId, archivedAt: null, linkedFromBotId: null },
-      select: { id: true, spaceId: true, name: true, title: true, color: true },
+      select: { id: true, spaceId: true, name: true, color: true },
     });
     if (!original || original.spaceId === input.spaceId)
       throw new OrganizationError("NOT_FOUND", "Bot not found");
@@ -113,7 +113,6 @@ export async function linkBotIntoSpace(
             userId: actor.userId,
             linkedFromBotId: original.id,
             name: original.name,
-            title: original.title,
             color: original.color,
             notifyOnFinish: false,
             computerId: computer.id,
@@ -168,7 +167,6 @@ export async function listLinkableBots(
       select: {
         id: true,
         name: true,
-        title: true,
         color: true,
         spaceId: true,
         space: { select: { name: true } },
@@ -188,7 +186,7 @@ export async function listLinkableBots(
     return originals.map((bot) => ({
       id: bot.id,
       name: bot.name,
-      title: bot.title,
+      title: "",
       color: bot.color,
       spaceId: bot.spaceId,
       spaceName: bot.space.name,
@@ -277,12 +275,12 @@ export async function loadLinkedBotHome(
  * its link and never rewrites that bot's instructions; any other bot is returned as it is.
  */
 export async function withLinkedBotHome<
-  T extends { linkedFromBotId: string | null; userId: string; selfUpdateInstructions: boolean },
+  T extends { linkedFromBotId: string | null; userId: string },
 >(prisma: PrismaClient, bot: T): Promise<T> {
   if (!bot.linkedFromBotId) return bot;
   const home = await loadLinkedBotHome(prisma, {
     linkedFromBotId: bot.linkedFromBotId,
     userId: bot.userId,
   });
-  return { ...bot, ...home, selfUpdateInstructions: false };
+  return { ...bot, ...home };
 }

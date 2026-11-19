@@ -48,6 +48,7 @@ const NOT_PASSED: Record<string, string> = {
   INVOCATION_ID: "restart-supervisor detection for systemd hosts; Compose restarts containers",
   ANVIQ_ALLOW_DEV_SECRETS: "development-only escape hatch for placeholder secrets",
   EMAIL_EMULATOR: "ignored when NODE_ENV=production",
+  AWS_KMS_PROFILE: "for maintainer laptops; servers use AWS_KMS_ACCESS_KEY_ID and its secret",
   GIT_SHA: "baked into the image at build time; a pass-through entry would unset it",
   SHELL: "host shell for the desktop computer, which only the Electron app runs",
   CLOUDFLARE_ACCOUNT_ID: "written into Pi's environment from stored gateway settings",
@@ -85,8 +86,7 @@ const INDIRECT = {
   shared: [
     // core/secrets-guard.ts resolves these by name.
     "SANDBOX_SUPERVISOR_TOKEN",
-    // adapters/auto-review.ts and pi-local-provider.ts read these through small helpers.
-    "ANVIQ_AUTO_REVIEW",
+    // pi-local-provider.ts reads these through a small helper.
     "ANVIQ_LOCAL_CONTEXT_WINDOW",
     "ANVIQ_LOCAL_MAX_TOKENS",
     // The OTLP exporter reads its standard settings itself.

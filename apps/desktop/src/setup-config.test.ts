@@ -15,6 +15,7 @@ import {
   resolveStartupTarget,
   safeExternalUrl,
   serializeSetup,
+  serverHeadersFor,
   servesBundledRenderer,
   sessionPartitionForServerUrl,
 } from "./setup-config.js";
@@ -145,6 +146,40 @@ describe("saved setup", () => {
     });
     expect(parseSetupInput({ mode: "new", serverUrl: ANVIQ_CLOUD_URL })).toBeNull();
     expect(servesBundledRenderer(ANVIQ_CLOUD_URL, false)).toBe(false);
+  });
+});
+
+describe("server request headers", () => {
+  const access = { "CF-Access-Client-Id": "id.access", "CF-Access-Client-Secret": "secret" };
+  const setup = {
+    mode: "existing",
+    serverUrl: "https://anviq.example.com",
+    headers: access,
+  } as const;
+
+  it("saves headers for an existing server and drops an empty set", () => {
+    expect(parseStoredSetup(serializeSetup(setup))).toEqual(setup);
+    expect(
+      parseSetupInput({ mode: "existing", serverUrl: "https://anviq.example.com", headers: {} }),
+    ).toEqual({ mode: "existing", serverUrl: "https://anviq.example.com" });
+  });
+
+  it("refuses headers Anviq Agents owns and headers for a new local instance", () => {
+    expect(parseSetupInput({ ...setup, headers: { Cookie: "a=b" } })).toBeNull();
+    expect(parseSetupInput({ ...setup, headers: "x: y" })).toBeNull();
+    expect(
+      parseSetupInput({ mode: "new", serverUrl: "http://127.0.0.1:5173", headers: access }),
+    ).toBeNull();
+  });
+
+  it("adds them only to the saved server, websockets included", () => {
+    expect(serverHeadersFor("https://anviq.example.com/rpc/me", setup)).toEqual(access);
+    expect(serverHeadersFor("wss://anviq.example.com/novnc/websockify", setup)).toEqual(access);
+    expect(serverHeadersFor("https://anviq.example.com.evil/rpc", setup)).toEqual({});
+    expect(serverHeadersFor("http://anviq.example.com/rpc", setup)).toEqual({});
+    expect(serverHeadersFor("https://accounts.example.com/", setup)).toEqual({});
+    expect(serverHeadersFor("not a url", setup)).toEqual({});
+    expect(serverHeadersFor("https://anviq.example.com/", null)).toEqual({});
   });
 });
 

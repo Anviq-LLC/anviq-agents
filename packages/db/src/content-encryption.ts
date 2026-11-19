@@ -568,7 +568,12 @@ export function withContentEncryption(prisma: PrismaClient, ring: ContentKeyRing
       if (typeof where.id !== "string")
         throw new Error(`Encrypted ${model} content must be updated by id`);
       const context = await ring.rowContext(spec.table, where.id);
-      return { ...args, data: await seal(spec, args.data as RecordValue, where.id, context) };
+      const data = args.data as RecordValue;
+      const movedSpaceId =
+        "column" in spec.space ? connected(data, spec.space.column, "space") : undefined;
+      const targetContext =
+        typeof movedSpaceId === "string" ? { ...context, spaceId: movedSpaceId } : context;
+      return { ...args, data: await seal(spec, data, where.id, targetContext) };
     }
     return args;
   }

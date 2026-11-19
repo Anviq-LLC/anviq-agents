@@ -6,7 +6,7 @@ import { getLogger } from "@anviq/logging";
 import type { ExecutorDeps } from "./executor-deps.js";
 import { toStringRecord } from "./memory-provider-factory.js";
 import { assertNoMcpEndpointCredential, assertSafeRemoteUrl } from "./remote-mcp.js";
-import { isUniqueViolation, persistMessageInTransaction } from "./run-messages.js";
+import { isUniqueViolation, persistMessageInTransaction, runLeaseFor } from "./run-messages.js";
 
 export { deriveMcpSlug } from "@anviq/core";
 
@@ -214,7 +214,16 @@ export async function addMcpServerFromTool(
           status: "pending",
         },
       ];
-      const committed = await persistMessageInTransaction(tx, run, "bot", blocks);
+      const committed = await persistMessageInTransaction(
+        tx,
+        run,
+        "bot",
+        blocks,
+        undefined,
+        undefined,
+        false,
+        runLeaseFor(deps, run.id),
+      );
       return {
         server,
         eventSeq: committed.eventSeq,

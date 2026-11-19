@@ -1,3 +1,4 @@
+import { artifactTypeLabel } from "@anviq/core";
 import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -21,12 +22,7 @@ import type { MobileBot } from "../lib/api";
 import { rpc } from "../lib/api";
 import { mobileTokens } from "../lib/appearance";
 import type { MobileArtifactSummary } from "../lib/artifacts";
-import {
-  listSpaceArtifacts,
-  matchesArtifactQuery,
-  mimeBadgeLabel,
-  removeArtifact,
-} from "../lib/artifacts";
+import { listSpaceArtifacts, matchesArtifactQuery, removeArtifact } from "../lib/artifacts";
 import { useI18n } from "../lib/i18n";
 import { native, useThemedStyles } from "../lib/native";
 import { useSideInsets } from "../lib/side-insets";
@@ -262,7 +258,14 @@ export default function ArtifactsScreen() {
                 label={bot.name}
                 active={activeBotId === bot.id}
                 onPress={() => setActiveBotId(bot.id)}
-                avatar={<BotAvatar color={bot.color} identity={bot.id} size={16} />}
+                avatar={
+                  <BotAvatar
+                    color={bot.color}
+                    avatarSet={bot.avatarSet}
+                    identity={bot.id}
+                    size={16}
+                  />
+                }
               />
             ))}
           </ScrollView>
@@ -402,7 +405,7 @@ function ArtifactRow({
             {item.name}
           </Text>
           {item.versionCount > 1 ? <Text style={styles.badge}>{`v${item.version}`}</Text> : null}
-          <Text style={styles.badge}>{mimeBadgeLabel(item.mimeType)}</Text>
+          <Text style={styles.badge}>{artifactTypeLabel(item.mimeType)}</Text>
         </View>
         {item.description ? (
           <Text style={styles.rowDescription} numberOfLines={1}>
@@ -412,7 +415,7 @@ function ArtifactRow({
         <View style={styles.rowFooter}>
           {bot ? (
             <>
-              <BotAvatar color={bot.color} identity={bot.id} size={14} />
+              <BotAvatar color={bot.color} avatarSet={bot.avatarSet} identity={bot.id} size={14} />
               <Text style={styles.rowBotName} numberOfLines={1}>
                 {bot.name}
               </Text>

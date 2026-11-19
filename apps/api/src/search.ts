@@ -124,17 +124,12 @@ export async function querySpaceSearch(
   const needle = query.toLowerCase();
   const botRows = await prisma.bot.findMany({
     where: { spaceId: actor.spaceId, userId: actor.userId, archivedAt: null },
-    select: { id: true, name: true, title: true, description: true },
+    select: { id: true, name: true, description: true },
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
     take: SEALED_SCAN_LIMIT,
   });
   const bots = botRows
-    .filter(
-      (bot) =>
-        includesText(bot.name, needle) ||
-        includesText(bot.title, needle) ||
-        includesText(bot.description, needle),
-    )
+    .filter((bot) => includesText(bot.name, needle) || includesText(bot.description, needle))
     .slice(0, CONVERSATION_HIT_LIMIT);
   for (const bot of bots) {
     pushInto(
@@ -144,7 +139,7 @@ export async function querySpaceSearch(
         botId: bot.id,
         botName: bot.name,
         title: bot.name,
-        snippet: displayName(bot.title, "") || bot.description || displayName(bot.name, ""),
+        snippet: bot.description || displayName(bot.name, ""),
       },
       CONVERSATION_HIT_LIMIT * 2,
     );

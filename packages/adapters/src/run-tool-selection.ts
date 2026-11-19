@@ -4,6 +4,7 @@ import { builtinAgentTools } from "./builtin-tools.js";
 import { selectCloudAgentTools } from "./cloud-agent-tools-select.js";
 import { selectMemoryTools } from "./memory-tools.js";
 import { filterImageReturningComputerTools } from "./model-vision.js";
+import { USER_COMPUTER_SCREEN_TOOLS } from "./run-tools-user-computer.js";
 import {
   filterBuiltinToolsForRun,
   filterBuiltinToolsForThread,
@@ -83,11 +84,12 @@ export function selectBuiltinToolsForRun(options: {
   startedByTeammate?: boolean;
   /** The person who started this run has their desktop connected (see userComputerOwner). */
   userComputer?: boolean;
+  /** That desktop can look at and drive its apps. */
+  userComputerScreen?: boolean;
 }) {
   const disabled = disabledBuiltinToolSet(options.disabledBuiltinTools);
-  const fleetToolsAllowed =
-    !options.startedByTeammate &&
-    isOwnerStartedRun(options.trigger, Boolean(options.followUpFromUser));
+  const ownerStartedRun = isOwnerStartedRun(options.trigger, Boolean(options.followUpFromUser));
+  const fleetToolsAllowed = !options.startedByTeammate && ownerStartedRun;
   return selectCloudAgentTools(
     selectMemoryTools(
       filterBuiltinToolsForRun(
@@ -109,7 +111,8 @@ export function selectBuiltinToolsForRun(options: {
       !disabled.has(tool.name) &&
       (options.trigger !== "created" || CREATED_RUN_TOOL_NAMES.has(tool.name)) &&
       (!FLEET_TOOL_NAMES_SET.has(tool.name) ||
-        (Boolean(options.fleetManagement) && fleetToolsAllowed)) &&
+        (Boolean(options.fleetManagement) && ownerStartedRun)) &&
+      (ownerStartedRun || (tool.name !== "update_preferences" && tool.name !== "feedback")) &&
       (options.paymentWalletEnabled || !PURCHASE_TOOL_NAMES.has(tool.name)) &&
       (options.mediaImagesEnabled || tool.name !== "generate_image") &&
       (options.mediaVideoEnabled || tool.name !== "generate_video") &&
@@ -126,6 +129,8 @@ export function selectBuiltinToolsForRun(options: {
         ].includes(tool.name)) &&
       (options.voiceCall || tool.name !== "end_call") &&
       (options.userComputer || tool.name !== "user_computer_shell") &&
+      ((options.userComputer && options.userComputerScreen) ||
+        !USER_COMPUTER_SCREEN_TOOLS.has(tool.name)) &&
       // Already on a call, or reached through a messaging channel that cannot ring.
       ((options.phoneCallsEnabled &&
         !options.groupId &&
@@ -142,15 +147,17 @@ export function selectBuiltinToolsForRun(options: {
         (!["remember", "save_memory", "recall_memory", "forget_memory"].includes(tool.name) &&
           !tool.name.startsWith("scratchpad_"))) &&
       (!options.messagingChannelRun ||
-        (![
-          "remember",
-          "save_shared_memory",
-          "save_memory",
-          "recall_memory",
-          "forget_memory",
-          "task_catalog",
-          "board_tickets",
-        ].includes(tool.name) &&
+        (!SCHEDULE_TOOL_NAMES.has(tool.name) &&
+          !SKILL_TOOL_NAMES.has(tool.name) &&
+          ![
+            "remember",
+            "save_shared_memory",
+            "save_memory",
+            "recall_memory",
+            "forget_memory",
+            "task_catalog",
+            "board_tickets",
+          ].includes(tool.name) &&
           !tool.name.startsWith("scratchpad_") &&
           !tool.name.startsWith("ticket_"))),
   );
@@ -173,4 +180,26 @@ export function filterPageBrowserTools<T extends { name: string }>(
 /** The fleet tools this run was offered, the same decision as tool selection. */
 export function offeredFleetTools(tools: readonly { name: string }[]): string[] {
   return tools.map((tool) => tool.name).filter((name) => FLEET_TOOL_NAMES_SET.has(name));
+}
+
+const FOLLOW_UP_TOOL_NAMES = [
+  "scratchpad_add",
+  "scratchpad_complete",
+  "schedule_create",
+  "schedule_cancel",
+];
+
+/**
+ * Whether this run can set its own follow-ups. Only a run the owner started can tell what is
+ * still open with them; routines, webhooks, channels, subagents and hand-offs from other bots
+ * are not, and some of them would need approval for every schedule.
+ */
+export function followUpsOffered(
+  tools: readonly { name: string }[],
+  ownerStartedRun: boolean,
+): boolean {
+  return (
+    ownerStartedRun &&
+    FOLLOW_UP_TOOL_NAMES.every((name) => tools.some((tool) => tool.name === name))
+  );
 }
