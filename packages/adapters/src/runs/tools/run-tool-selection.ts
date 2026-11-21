@@ -1,3 +1,4 @@
+import type { ConnectorTool } from "@anviq/adapter-kit";
 import { disabledBuiltinToolSet, FLEET_TOOL_NAMES, FLEET_WRITE_TOOL_NAMES } from "@anviq/contracts";
 import { BACKGROUND_HELPER_TRIGGER, isBackgroundRunTrigger, isOwnerStartedRun } from "@anviq/core";
 import { selectCloudAgentTools } from "../../cloud-agents/cloud-agent-tools-select.js";
@@ -5,6 +6,8 @@ import { READ_MEETING_TRANSCRIPT } from "../../meetings/meeting-chat.tool-defini
 import { selectMemoryTools } from "../../memory/memory-tools.js";
 import { filterImageReturningComputerTools } from "../../models/model-vision.js";
 import { builtinAgentTools } from "../../tools/builtin.tool-definition.js";
+import { RUN_CODE } from "../../tools/builtin-code.tool-definition.js";
+import { isCatalogExecuteTool } from "../../tools/lazy-tool-catalog.js";
 import {
   filterBuiltinToolsForRun,
   filterBuiltinToolsForThread,
@@ -23,6 +26,7 @@ export const READ_ONLY_AGENT_TOOLS = new Set([
   "read_email",
   "search_history",
   "request_takeover",
+  "run_code",
   "run_subagent",
   "task_catalog",
   "recall_memory",
@@ -74,6 +78,16 @@ export const SUBAGENT_HIDDEN_TOOLS: ReadonlySet<string> = new Set([
   "update_preferences",
   "feedback",
 ]);
+
+/** Scripts reach apps through the tool catalog, so run_code is offered only where there is one. */
+export function offerCodeTool<T extends { name: string }>(
+  builtins: T[],
+  connectorTools: readonly ConnectorTool[],
+): T[] {
+  return connectorTools.some(isCatalogExecuteTool)
+    ? builtins
+    : builtins.filter((tool) => tool.name !== RUN_CODE);
+}
 
 /** Cross-owner agent connections only exist for chat-linked bots, in turns that can talk. */
 export function offersAgentConnectionTools(options: {

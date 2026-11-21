@@ -1,6 +1,7 @@
 import type { ConnectorTool } from "@anviq/adapter-kit";
 import { FLEET_TOOL_NAMES } from "@anviq/contracts";
 import { meetingTranscriptTool } from "../meetings/meeting-chat.tool-definition.js";
+import { codeTools } from "./builtin-code.tool-definition.js";
 import { computerTools } from "./builtin-computer.tool-definition.js";
 import { conversationTools } from "./builtin-conversation.tool-definition.js";
 import { fleetTools } from "./builtin-fleet.tool-definition.js";
@@ -20,6 +21,7 @@ export const DELEGATION_TOOL_NAMES = new Set<string>([
 export const builtinAgentTools: ConnectorTool[] = [
   ...computerTools,
   ...conversationTools,
+  ...codeTools,
   meetingTranscriptTool,
   ...serviceTools,
   ...memoryTools,

@@ -40,6 +40,7 @@ export const CORE_BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
   "request_takeover",
   "request_secret",
   "connect_app",
+  "run_code",
   "run_subagent",
   "message_bot",
   "skill_read",

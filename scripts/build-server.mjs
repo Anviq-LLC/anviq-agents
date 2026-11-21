@@ -61,7 +61,10 @@ export function serverBuildOptions(entry, outfile) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   for (const entry of process.argv.slice(2)) {
-    const outfile = path.resolve("dist", path.relative("src", entry).replace(/\.ts$/, ".js"));
+    // An entry outside this app (a worker thread script) lands beside the app's own entry.
+    const relative = path.relative("src", entry);
+    const name = relative.startsWith("..") ? path.basename(entry) : relative;
+    const outfile = path.resolve("dist", name.replace(/\.ts$/, ".js"));
     await build(serverBuildOptions(entry, outfile));
   }
 }
