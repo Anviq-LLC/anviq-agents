@@ -153,6 +153,8 @@ function OrganizationSettings({
 
   // Alone in it, its owner is offered to invite someone instead of a count of one.
   const inviteFirst = organization.memberCount === 1 && canManageOrganizationMembers(organization);
+  // Company memory is for a team, so a workspace of one does not show it.
+  const showMemory = organization.memberCount > 1;
   return (
     <div className="space-y-8" data-testid="organization-settings">
       <SettingsGroup>
@@ -202,7 +204,7 @@ function OrganizationSettings({
         </SettingsRow>
         <button
           type="button"
-          className="flex min-h-15 w-full items-center justify-between gap-4 px-4 py-3 text-start hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+          className={`flex min-h-15 w-full items-center justify-between gap-4 px-4 py-3 text-start hover:bg-accent focus-visible:bg-accent focus-visible:outline-none ${showMemory ? "" : "rounded-b-xl"}`}
           onClick={() => onPageChange("members")}
         >
           <span className="text-body text-foreground">
@@ -213,19 +215,21 @@ function OrganizationSettings({
             <ChevronRight aria-hidden="true" className="size-4 rtl:rotate-180" />
           </span>
         </button>
-        <button
-          type="button"
-          className="flex min-h-15 w-full items-center justify-between gap-4 rounded-b-xl px-4 py-3 text-start hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
-          onClick={() => onPageChange("memory")}
-        >
-          <span className="text-body text-foreground">
-            <Trans>Company memory</Trans>
-          </span>
-          <ChevronRight
-            aria-hidden="true"
-            className="size-4 text-muted-foreground rtl:rotate-180"
-          />
-        </button>
+        {showMemory ? (
+          <button
+            type="button"
+            className="flex min-h-15 w-full items-center justify-between gap-4 rounded-b-xl px-4 py-3 text-start hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+            onClick={() => onPageChange("memory")}
+          >
+            <span className="text-body text-foreground">
+              <Trans>Company memory</Trans>
+            </span>
+            <ChevronRight
+              aria-hidden="true"
+              className="size-4 text-muted-foreground rtl:rotate-180"
+            />
+          </button>
+        ) : null}
       </SettingsGroup>
     </div>
   );
