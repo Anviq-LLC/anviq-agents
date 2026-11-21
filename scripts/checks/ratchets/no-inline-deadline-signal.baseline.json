@@ -1,11 +1,11 @@
 {
   "apps/api/src/calls/speech-summary.ts": 1,
   "apps/api/src/calls/voice.ts": 1,
-  "apps/api/src/integrations/integration-catalog.ts": 1,
   "packages/adapters/src/approvals/decision-auto-review.ts": 1,
   "packages/adapters/src/computers/computer-disk.ts": 1,
   "packages/adapters/src/computers/host/host-computer-sandbox.ts": 1,
   "packages/adapters/src/computers/host/user-device-gateway.ts": 1,
+  "packages/adapters/src/integrations/integration-catalog-search.ts": 1,
   "packages/adapters/src/integrations/plugin-connectors.ts": 1,
   "packages/adapters/src/media/media-generation-provider.ts": 1,
   "packages/adapters/src/models/model-connect-check.ts": 1,

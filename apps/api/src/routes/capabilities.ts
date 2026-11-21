@@ -4,10 +4,12 @@ import {
   createPluginMarketplace,
   isTransientFetchError,
   MCP_SOURCE_PRESETS,
+  PUBLIC_INTEGRATION_CATALOG_URL,
   pluginPreviewDto,
   prepareApiInstall,
   prepareGraphqlInstall,
   previewPluginInstall,
+  searchIntegrationCatalog,
   verifyMcpInstall,
 } from "@anviq/adapters";
 import type { Actor } from "@anviq/contracts";
@@ -17,7 +19,6 @@ import type { Prisma } from "@anviq/db";
 import { AVAILABILITY_SELECT, availableInSpace, itemSecretIn, spaceAvailability } from "@anviq/db";
 import { ORPCError } from "@orpc/server";
 import { requireAdmin } from "../auth/admins.js";
-import { searchIntegrationCatalog } from "../integrations/integration-catalog.js";
 import { assertMcpRemoteEndpoint, mayUsePrivateEndpoint } from "../integrations/mcp-servers.js";
 import {
   installConfig,
@@ -120,7 +121,7 @@ export function capabilitiesRoutes(ctx: RouterContext) {
       catalogSearch: authed.capabilities.catalogSearch.handler(async ({ context, input }) => {
         const baseUrl =
           deps.env.integrationsCatalogUrl ??
-          (input.usePublicCatalog ? "https://integrations.sh" : undefined);
+          (input.usePublicCatalog ? PUBLIC_INTEGRATION_CATALOG_URL : undefined);
         if (!baseUrl) return { enabled: false, results: [] };
         const results = await searchIntegrationCatalog({
           baseUrl,
