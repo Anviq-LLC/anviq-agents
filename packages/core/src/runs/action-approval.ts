@@ -58,6 +58,8 @@ const OUTSIDE_RUN_SAFE_BUILTIN_TOOLS = new Set([
   "recall_memory",
   "reflect_memory",
   "request_takeover",
+  // Each read it makes passes the same checks as a direct one.
+  "run_code",
   "run_subagent",
   "schedule_list",
   "scratchpad_list",
