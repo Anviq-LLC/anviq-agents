@@ -1,5 +1,8 @@
 # Syncing upstream
 
+This page is the procedure for taking upstream changes. Read [what this fork adds](./README.md) first:
+it is the list of what a sync must not lose.
+
 Anviq Agents follows [rakazo](https://github.com/elie222/rakazo). The `upstream` remote points at it and
 `anviq-upstream` is a branch holding upstream with the Anviq rename already applied, so merges only
 conflict where Anviq really diverges.
