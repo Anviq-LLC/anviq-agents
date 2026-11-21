@@ -1,5 +1,5 @@
 import type { ConnectorApp } from "@anviq/adapter-kit";
-import { isBackgroundRunTrigger, redactSecrets } from "@anviq/core";
+import { isBackgroundRunTrigger, outsideRunToolRequiresApproval, redactSecrets } from "@anviq/core";
 import { normalizedHttpUrl } from "@anviq/core/egress";
 import { getLogger } from "@anviq/logging";
 import { executeCloudAgentTool } from "../../cloud-agents/cloud-agent-service.js";
@@ -9,7 +9,7 @@ import {
   sanitizeConnectorError,
 } from "../../integrations/connector-safety.js";
 import { mcpAppViewArguments, mcpAppViewResult } from "../../mcp/mcp-app.js";
-import { addMcpServerFromTool } from "../../mcp/mcp-server-tool.js";
+import { addMcpServerFromTool, connectMcpByName } from "../../mcp/mcp-server-tool.js";
 import { serviceCallFromTool, serviceSearchFromTool } from "../../payments/paid-service-tools.js";
 import { collectLogIds } from "../../providers/integration/composio/composio-connector.js";
 import { storeMcpAppHtml } from "../../storage/thread-artifacts.js";
@@ -210,6 +210,21 @@ export const integrationTools: ToolHandlers = {
         run,
         args.app,
         applied?.effect.id ?? runScopedToolExecutionId(runId, executionId),
+        async (app) =>
+          // Adding a server is gated like add_mcp_server: not from a run outside text started.
+          outsideRunToolRequiresApproval(run.trigger, "add_mcp_server")
+            ? {
+                error:
+                  "This kind of run can't add MCP servers. Ask the user to connect it in chat.",
+              }
+            : connectMcpByName(
+                deps,
+                run,
+                ctx.bot.id,
+                app,
+                executionId,
+                context.signal ?? new AbortController().signal,
+              ),
       ),
     );
   },

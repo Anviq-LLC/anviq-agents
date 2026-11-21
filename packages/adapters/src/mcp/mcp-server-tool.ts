@@ -1,9 +1,13 @@
 import type { McpTransport, MessageBlock } from "@anviq/contracts";
 import { McpRemoteEndpointSchema, McpTransportSchema } from "@anviq/contracts";
-import { deriveMcpSlug } from "@anviq/core";
+import { deriveMcpSlug, signInMcpServers } from "@anviq/core";
 import type { McpServer } from "@anviq/db";
 import { isUniqueViolation } from "@anviq/db";
 import { getLogger } from "@anviq/logging";
+import {
+  PUBLIC_INTEGRATION_CATALOG_URL,
+  searchIntegrationCatalog,
+} from "../integrations/integration-catalog-search.js";
 import { toStringRecord } from "../memory/memory-provider-factory.js";
 import { persistMessageInTransaction, runLeaseFor } from "../runs/assembly/run-messages.js";
 import type { ExecutorDeps } from "../runs/executor/executor-deps.js";
@@ -122,6 +126,70 @@ export function needsOAuthProbe(parsed: {
   const env = parsed.env ?? {};
   const headers = parsed.headers ?? {};
   return !parsed.secret && Object.keys(env).length === 0 && Object.keys(headers).length === 0;
+}
+
+/**
+ * connect_app for an app no provider lists: finds a remote MCP server by name in the catalog and
+ * registers it, which posts the same approval card the user answers for any added server.
+ * Undefined when the catalog has nothing (or is unreachable), so the caller can say so.
+ */
+export async function connectMcpByName(
+  deps: ExecutorDeps,
+  run: Parameters<typeof addMcpServerFromTool>[1],
+  botId: string,
+  app: string,
+  executionId: string,
+  signal: AbortSignal,
+) {
+  let servers: ReturnType<typeof signInMcpServers>;
+  try {
+    servers = signInMcpServers(
+      await searchIntegrationCatalog({
+        baseUrl: deps.integrationsCatalogUrl ?? PUBLIC_INTEGRATION_CATALOG_URL,
+        query: app,
+        signal,
+        fetch: deps.secretHttp?.fetch,
+      }),
+    );
+  } catch (error) {
+    if (signal.aborted) throw error;
+    return undefined;
+  }
+  const wanted = app.toLowerCase();
+  const exact = servers.filter((server) => server.name.toLowerCase() === wanted);
+  const [server] = exact.length === 1 ? exact : servers;
+  if (!server) return undefined;
+  if (exact.length !== 1 && servers.length > 1) {
+    return {
+      error: `Several MCP servers match: ${servers.map((entry) => entry.name).join(", ")}. Ask the user which one.`,
+    };
+  }
+  // A repeated request finds the server it already added, as the provider path finds its card.
+  const existing = await deps.prisma.mcpServer.findFirst({
+    where: { spaceId: run.spaceId, userId: run.userId, endpoint: server.endpoint },
+    select: { id: true },
+  });
+  if (existing) {
+    const assigned = await deps.prisma.botMcpServer.count({
+      where: { botId, serverId: existing.id },
+    });
+    return assigned
+      ? {
+          status: "connected",
+          message: "This server is already connected and its tools are available.",
+        }
+      : {
+          status: "pending",
+          message: "This server was already added. Wait for the user to approve it in the chat.",
+        };
+  }
+  return addMcpServerFromTool(
+    deps,
+    run,
+    botId,
+    { name: server.name, transport: "streamable_http", endpoint: server.endpoint },
+    executionId,
+  );
 }
 
 /** add_mcp_server: registers the server and, when asked, posts its approval card. */

@@ -80,6 +80,7 @@ export * from "./integrations/connector-catalog.js";
 export * from "./integrations/connector-registry.js";
 export * from "./integrations/graphql-connectors.js";
 export * from "./integrations/installed-connectors.js";
+export * from "./integrations/integration-catalog-search.js";
 export * from "./integrations/integration-provider-settings.js";
 export * from "./integrations/plugin-connectors.js";
 export * from "./integrations/plugin-marketplace.js";
