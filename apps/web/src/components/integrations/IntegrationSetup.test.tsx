@@ -63,6 +63,43 @@ it("searches the public catalog once for a query it opens with", async () => {
   ]);
 });
 
+async function type(value: string) {
+  const input = host.querySelector("input")!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  await act(async () => {
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+it("searches while typing, without a button", async () => {
+  await act(async () => root.render(<IntegrationSetup />));
+  await type(" canva ");
+  await vi.waitFor(() =>
+    expect(api.capabilities.catalogSearch.mock.calls).toEqual([
+      [{ query: "canva", usePublicCatalog: true }],
+    ]),
+  );
+  expect(host.textContent).not.toContain("Search integrations");
+});
+
+it("offers a pasted server address as the server to connect, without searching", async () => {
+  connectMcpEndpoint.mockResolvedValue("connected");
+  await act(async () => root.render(<IntegrationSetup botId="bot-1" />));
+  await type("https://mcp.tracker.example/mcp");
+  const connect = [...host.querySelectorAll("button")].find(
+    (button) => button.textContent === "Connect",
+  );
+  expect(host.textContent).toContain("mcp.tracker.example");
+  await act(async () => connect?.click());
+  expect(connectMcpEndpoint).toHaveBeenCalledWith({
+    name: "mcp.tracker.example",
+    endpoint: "https://mcp.tracker.example/mcp",
+    botId: "bot-1",
+  });
+  expect(api.capabilities.catalogSearch).not.toHaveBeenCalled();
+});
+
 async function connectTracker() {
   api.capabilities.catalogSearch.mockResolvedValue({
     enabled: true,

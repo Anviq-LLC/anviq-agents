@@ -16,6 +16,7 @@ const api = vi.hoisted(() => ({
   capabilities: { list: vi.fn(), catalogSearch: vi.fn(), sourcePresets: vi.fn() },
   mcp: { servers: { list: vi.fn() }, assignments: { list: vi.fn() } },
   marketplace: { catalog: vi.fn() },
+  integrationSetup: { get: vi.fn(), save: vi.fn() },
 }));
 
 vi.mock("../../lib/query/rpc", () => ({
@@ -145,6 +146,7 @@ beforeEach(() => {
   api.mcp.servers.list.mockReset().mockResolvedValue([]);
   api.mcp.assignments.list.mockReset().mockResolvedValue([]);
   api.marketplace.catalog.mockReset().mockResolvedValue({ entries: [], unavailableRegistries: [] });
+  api.integrationSetup.get.mockReset().mockResolvedValue({ providers: [] });
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -207,6 +209,23 @@ it("offers the public catalog for a search and sends nothing there until it is p
   expect(host.textContent).toContain("Add MCP server");
   expect(searchBox().value).toBe("canva");
   expect(publicSearches()).toEqual([[{ query: "canva", usePublicCatalog: true }]]);
+});
+
+it("keeps MCP search out of the way once a provider offers apps", async () => {
+  api.connections.catalog.mockResolvedValue([
+    { connectorId: "fixture", slug: "gmail", name: "Gmail", logo: null, connected: false },
+  ]);
+  await act(async () =>
+    root.render(
+      <QueryClientProvider client={client}>
+        <PluginsOverlay onClose={() => {}} />
+      </QueryClientProvider>,
+    ),
+  );
+  await vi.waitFor(() => expect(searchBox().disabled).toBe(false));
+  await type(searchBox(), "canva");
+  expect(host.textContent).toContain("No apps match your search.");
+  expect(publicCatalogRow()).toBeUndefined();
 });
 
 it("keeps complete Unicode initials in the connected-app marks", async () => {
