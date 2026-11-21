@@ -385,15 +385,11 @@ export async function gateToolCall(
         purchase: paying,
       });
   if (plan === "deny") {
-    await auditToolCall(ctx, name, "denied", {
-      reason: approvalResolved.decision === "deny" ? "rule" : "never_asks",
-    });
+    await auditToolCall(ctx, name, "denied", { reason: "rule" });
     return {
       result: refusal(
         "approval_denied",
-        approvalResolved.decision === "deny"
-          ? `${name} is blocked in this space${blockingRuleSuffix(approvalResolved)}. Don't try it another way; tell the user it's blocked.`
-          : `${name} needs the owner's approval because it could have been asked for by someone else, and this space never asks. Don't retry; tell the user.`,
+        `${name} is blocked in this space${blockingRuleSuffix(approvalResolved)}. Don't try it another way; tell the user it's blocked.`,
       ),
     };
   }
