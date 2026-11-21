@@ -246,7 +246,7 @@ describe("email languages", () => {
     const english = await welcomeEmail(user, "https://example.test/u");
     expect(english.subject).toBe("Welcome to Anviq Agents");
     expect(english.text).toContain("Hi Ana,");
-    expect(english.text).toContain("Anviq Agents runs on iPhone");
+    expect(english.text).toContain("Anviq Agents runs on Mac");
   });
 
   it("names a Space invitation's Space, never an organization, in every language", async () => {
