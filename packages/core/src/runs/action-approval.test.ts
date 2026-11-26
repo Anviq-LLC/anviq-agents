@@ -536,9 +536,9 @@ describe("planActionGate", () => {
     expect(gate("ask", { mandatory: true, resolved: allowed })).toBe("ask");
   });
 
-  it("in Never ask runs it for the owner's own run and refuses it when outside text could steer it", () => {
+  it("in Never ask runs it for the owner's own run and asks when outside text could steer it", () => {
     expect(gate("never", { mandatory: true, steerable: false })).toBe("allow");
-    expect(gate("never", { mandatory: true, steerable: true })).toBe("deny");
+    expect(gate("never", { mandatory: true, steerable: true })).toBe("ask");
   });
 
   it("only lets the approval model check a read outside content may have chosen", () => {

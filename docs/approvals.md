@@ -14,7 +14,8 @@ Open **Settings → Approvals** and pick a **Mode**:
   bot has read a page, an email or another bot's message, the model also checks memory and skill
   saves, routines and setting changes, and it never treats that text as your request.
 - **Never ask**: every action runs without waiting. Only Block rules and your spending limit stop
-  one.
+  one, and accepting another owner's bot connection still asks when outside content could have
+  requested it.
 
 The mode works the same in a routine and in a chat app you linked as in the app itself.
 
@@ -57,7 +58,7 @@ In **Auto** and **Ask**, these always show a card, and **Always allow** doesn't 
 - The first use of your own computer in a space, and of each app on it.
 
 **Never ask** runs all of them. The one exception is accepting another owner's bot connection, which
-it refuses when someone else started the run or outside content entered it.
+it still asks you about when someone else started the run or outside content entered it.
 
 ## Spending limit
 

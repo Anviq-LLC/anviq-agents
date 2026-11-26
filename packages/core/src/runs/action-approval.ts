@@ -612,7 +612,8 @@ export type AutoReviewJudgeDecision = "pass" | "ask" | "error";
 /**
  * The gate after rule resolution: the approval mode alone decides whether a call asks. A block
  * refuses in every mode. Never ask runs everything else without waiting (the spending limit still
- * applies), except a call `steerable` says outside text could have asked for. A purchase or an
+ * applies), except a call `steerable` says outside text could have asked for, which asks a
+ * person. A purchase or an
  * approval a person must give asks in Ask and Auto, and no allow rule or review passes it.
  * Otherwise an ask rule asks, and anything that would ask goes to the approval model in Auto,
  * falling back to asking when no model is set up.
@@ -622,7 +623,7 @@ export function planActionGate(input: {
   mode: ApprovalMode;
   /** Needs a person whatever the rules say (see toolRequiresExplicitApproval). */
   mandatory?: boolean;
-  /** Never ask refuses it: the owner did not start this run, or outside content entered it. */
+  /** Never ask still asks a person: the owner did not start this run, or outside content entered it. */
   steerable?: boolean;
   consequential: boolean;
   /**
@@ -637,7 +638,7 @@ export function planActionGate(input: {
   purchase?: boolean;
 }): "ask" | "allow" | "judge" | "deny" {
   if (input.resolved.decision === "deny") return "deny";
-  if (input.mode === "never") return input.steerable ? "deny" : "allow";
+  if (input.mode === "never") return input.steerable ? "ask" : "allow";
   if (input.purchase || input.mandatory) return "ask";
   if (input.resolved.decision === "ask") return "ask";
   const review = input.mode === "auto" && input.checkerConfigured ? "judge" : "ask";
