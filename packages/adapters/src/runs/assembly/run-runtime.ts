@@ -90,6 +90,8 @@ export interface RunRuntimeEnv extends PipedreamEnvironmentValues {
   mcpStdioAllowedCommands: string[];
   mcpStdio: ReturnType<typeof mcpStdioOptionsFromEnv>;
   mcpAllowPrivateEndpoint: boolean;
+  /** Where a bot looks up MCP servers by app name; the public catalog when unset. */
+  integrationsCatalogUrl: string | undefined;
   deploymentLabs: LabFeature[];
   phoneCallsEnabled: boolean;
   phoneCallRingSeconds: number;
@@ -123,6 +125,7 @@ export function runRuntimeEnvFromProcess(source: NodeJS.ProcessEnv): RunRuntimeE
       .filter(Boolean),
     mcpStdio: mcpStdioOptionsFromEnv(source),
     mcpAllowPrivateEndpoint: source.MCP_ALLOW_PRIVATE_ENDPOINT === "true",
+    integrationsCatalogUrl: source.INTEGRATIONS_CATALOG_URL?.trim() || undefined,
     pipedreamClientId: source.PIPEDREAM_CLIENT_ID,
     pipedreamClientSecret: source.PIPEDREAM_CLIENT_SECRET,
     pipedreamProjectId: source.PIPEDREAM_PROJECT_ID,
@@ -220,6 +223,7 @@ type SetByRunRuntime =
   | "listConnectedPlugins"
   | "secrets"
   | "mcpAllowPrivateEndpoint"
+  | "integrationsCatalogUrl"
   | "deploymentModelKey"
   | "deploymentModelConfigured"
   | "dataDir"
@@ -304,6 +308,7 @@ export function createRunRuntime(
       process.env.TYPESAFE_API_KEY ?? "",
     ].filter(Boolean),
     mcpAllowPrivateEndpoint: env.mcpAllowPrivateEndpoint,
+    integrationsCatalogUrl: env.integrationsCatalogUrl,
     deploymentModelKey: env.deploymentModelKey,
     deploymentModelConfigured: env.deploymentModelConfigured,
     dataDir: env.dataDir,

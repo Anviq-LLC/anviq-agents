@@ -99,6 +99,29 @@ describe("connect_app execution", () => {
     expect(await f.call("unavailable")).toHaveProperty("error");
     expect(stored).toHaveLength(0);
   });
+  it("hands an app no provider lists to the fallback, and only then", async () => {
+    const f = fixture();
+    const fallback = vi.fn(async () => ({ ok: true }));
+    const run = (app: string) =>
+      connectApp(f.deps, f.providers, f.context, f.target, app, "effect", fallback);
+    expect(await run("Notion")).toEqual({ ok: true });
+    expect(fallback).toHaveBeenCalledWith("Notion");
+    await run("Gmail");
+    expect(fallback).toHaveBeenCalledOnce();
+  });
+  it("still says the app is unavailable when the fallback finds nothing", async () => {
+    const f = fixture();
+    const result = await connectApp(
+      f.deps,
+      f.providers,
+      f.context,
+      f.target,
+      "Notion",
+      "effect",
+      async () => undefined,
+    );
+    expect(result).toHaveProperty("error");
+  });
   it("returns connected state without posting", async () => {
     const f = fixture([{ ...entry, connected: true }]);
     expect(await f.call()).toMatchObject({ status: "connected" });

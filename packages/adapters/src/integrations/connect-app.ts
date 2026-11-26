@@ -19,6 +19,8 @@ export async function connectApp(
   target: { id: string; spaceId: string; threadId: string; botId: string },
   app: unknown,
   effectId: string,
+  /** Tried when no provider lists the app, such as connecting an MCP server by name. */
+  fallback?: (app: string) => Promise<object | undefined>,
 ) {
   if (typeof app !== "string" || !app.trim() || app.length > 100) {
     return { error: "Provide an app name or slug of at most 100 characters." };
@@ -43,7 +45,13 @@ export async function connectApp(
       catalog.filter((item) => item.connected),
       app,
     ) ?? matchAppCatalog(catalog, app);
-  if (!entry) return { error: "No such app is available in the connector catalog." };
+  if (!entry) {
+    return (
+      (await fallback?.(app.trim())) ?? {
+        error: "No such app is available in the connector catalog.",
+      }
+    );
+  }
   const provider = providers.find((provider) => provider.describe().id === entry.connectorId);
   const reconnect =
     entry.connected && ((await provider?.needsReconnect?.(context, entry.slug)) ?? false);

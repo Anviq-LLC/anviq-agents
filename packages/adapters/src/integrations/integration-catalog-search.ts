@@ -1,6 +1,8 @@
 import type { IntegrationCatalogResult, IntegrationCatalogSurface } from "@anviq/contracts";
 import { ClientError, cancelResponseBody } from "@anviq/core";
 
+export const PUBLIC_INTEGRATION_CATALOG_URL = "https://integrations.sh";
+
 const RESPONSE_LIMIT = 1_000_000;
 const SEARCH_LIMIT = 8;
 const SURFACE_LIMIT = 24;

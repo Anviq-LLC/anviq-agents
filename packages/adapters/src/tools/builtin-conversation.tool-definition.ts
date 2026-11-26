@@ -233,7 +233,7 @@ export const conversationTools: ConnectorTool[] = [
   {
     name: "add_mcp_server",
     description:
-      "Connect a remote MCP tool server to this Space when the user asks you to add one and provides the details (URL, optional token/headers). The server is created immediately and an approval card appears in the chat; its tools reach you once the user approves it there. Do not invent endpoints; only use details the user provided. Local (stdio) servers can only be added by an admin in Settings.",
+      "Connect a remote MCP tool server to this Space when the user asks you to add one. Use the URL and credentials the user gave you, or, for a server they only named, the endpoint on the vendor's own documentation (find it with web_search and web_fetch). Never guess an endpoint. The server is created immediately and an approval card showing the endpoint appears in the chat; its tools reach you once the user approves it there. Local (stdio) servers can only be added by an admin in Settings.",
     inputSchema: {
       type: "object",
       properties: {
