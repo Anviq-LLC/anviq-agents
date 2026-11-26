@@ -19,6 +19,10 @@ const FEATURES = {
     "packages/adapters/src/org-key-provider.ts": ["OrgKeyProvider"],
     "apps/api/src/cli/content-encryption.ts": ["org-key"],
   },
+  "marketplace plugin toggle": {
+    "apps/api/src/routes/account.ts": ["hidePluginMarketplace"],
+    "apps/web/src/pages/plugins/use-catalog-browse.ts": ["hideMarketplace"],
+  },
   "linked bots": {
     "packages/db/src/linked-bots.ts": ["linkBotIntoSpace", "resolveGroupBotIds"],
     "packages/db/src/linked-bot-lifecycle.ts": ["unlinkBotsInOrganization"],

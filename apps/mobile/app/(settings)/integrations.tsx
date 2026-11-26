@@ -121,6 +121,7 @@ export default function Integrations() {
   const [sources, setSources] = useState<CapabilityInstall[]>([]);
   const [pluginInstalls, setPluginInstalls] = useState<CapabilityInstall[]>([]);
   const [pluginEntries, setPluginEntries] = useState<PluginMarketplaceEntry[]>([]);
+  const [hideMarketplace, setHideMarketplace] = useState(false);
   const [pluginsState, setPluginsState] = useState<"loading" | "ready" | "partial">("loading");
   const [category, setCategory] = useState("");
   const [pluginCount, setPluginCount] = useState(PLUGIN_PAGE_SIZE);
@@ -229,8 +230,8 @@ export default function Integrations() {
   const catalogApps = useMemo(() => filterConnectionCatalogItems(catalog, query), [catalog, query]);
   const renderedApps = catalogApps.slice(0, visibleCount);
   const { plugins, pluginForApp } = useMemo(
-    () => browsablePlugins(pluginEntries, catalog),
-    [pluginEntries, catalog],
+    () => browsablePlugins(pluginEntries, catalog, hideMarketplace),
+    [pluginEntries, catalog, hideMarketplace],
   );
   // Managed apps standing in for a plugin keep that plugin's category, so a category lists them too.
   const mergedBrands = catalog.flatMap((item) => {
@@ -380,6 +381,12 @@ export default function Integrations() {
     void rpc("capabilities/sourcePresets")
       .then(applyPresets)
       .catch(() => applyPresets([]));
+    const applyHidden = (hidden: boolean) => {
+      if (mounted.current) setHideMarketplace(hidden);
+    };
+    void rpc("me")
+      .then((me) => applyHidden(me.hidePluginMarketplace ?? false))
+      .catch(() => applyHidden(false));
     void rpc("marketplace/catalog", { query: "" })
       .then((result) => {
         if (
@@ -1258,6 +1265,14 @@ export default function Integrations() {
                   columns={catalogColumns}
                   onOpenPlugin={openPlugin}
                   renderAppTile={(item) => renderCatalogTile(item, item.name)}
+                />
+                <NativeActionButton
+                  fill={false}
+                  label={t`Integration settings`}
+                  onPress={() => router.push("/integration-settings")}
+                  prominence="quiet"
+                  size="compact"
+                  variant="text"
                 />
                 {pluginsState !== "loading" ? (
                   <NativeActionButton

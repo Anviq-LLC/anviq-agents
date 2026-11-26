@@ -30,11 +30,14 @@ export function useCatalogBrowse({
   catalogLoaded,
   loadError,
   pluginCatalog,
+  hideMarketplace,
 }: {
   catalog: ConnectionCatalogItem[];
   catalogLoaded: boolean;
   loadError: string | null;
   pluginCatalog: PluginConnections["pluginCatalog"];
+  /** Leaves out plugin connectors that no connected provider already offers as an app. */
+  hideMarketplace: boolean;
 }) {
   const { t } = useLingui();
   const [query, setQuery] = useState("");
@@ -75,8 +78,8 @@ export function useCatalogBrowse({
           forApp.set(catalogItemKey(app), entry);
       } else if (entry.hasConnector) listed.push(entry);
     }
-    return { plugins: listed, pluginForApp: forApp };
-  }, [catalog, catalogEntries]);
+    return { plugins: hideMarketplace ? NO_PLUGINS : listed, pluginForApp: forApp };
+  }, [catalog, catalogEntries, hideMarketplace]);
   const categoryLabels: Record<PluginCategory, string> = {
     productivity: t`Productivity`,
     communication: t`Communication`,
@@ -131,6 +134,7 @@ export function useCatalogBrowse({
     weakMatches,
     rendered,
     catalogEntries,
+    hideMarketplace,
     catalogsReady,
     plugins,
     pluginForApp,

@@ -8,6 +8,7 @@ import { PluginsOverlay } from "./PluginsOverlay";
 import { SourceFormView, useSourceForm } from "./source-form";
 
 const api = vi.hoisted(() => ({
+  me: vi.fn(),
   connections: {
     catalog: vi.fn(),
     list: vi.fn(),
@@ -112,6 +113,7 @@ let root: ReturnType<typeof createRoot>;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  api.me.mockReset().mockResolvedValue({ hidePluginMarketplace: false });
   api.connections.catalog.mockReset().mockResolvedValue([]);
   api.connections.list.mockReset().mockResolvedValue([]);
   api.connections.tools.mockReset().mockResolvedValue([]);
@@ -291,6 +293,49 @@ it("opens both Unicode fallback screenshot targets through browse and manage", a
   expect(
     host.querySelector('[data-testid="connection-detail"] .place-items-center')?.textContent,
   ).toBe("𠮷");
+});
+
+it("leaves marketplace connectors out and links to the integration settings when they are hidden", async () => {
+  api.me.mockResolvedValue({ hidePluginMarketplace: true });
+  api.marketplace.catalog.mockResolvedValue({
+    entries: [
+      {
+        id: "openclaw",
+        name: "openclaw",
+        displayName: "OpenClaw",
+        description: "Fixture integration",
+        keywords: [],
+        category: "productivity",
+        logo: null,
+        homepage: null,
+        domains: [],
+        registry: "fixture",
+        source: "https://example.test/plugin",
+        installedSource: "https://example.test/plugin",
+        hasConnector: true,
+        skillCount: 0,
+      },
+    ],
+    unavailableRegistries: [],
+    skippedEntries: 0,
+  });
+  const openSettings = vi.fn();
+  await act(async () =>
+    root.render(
+      <QueryClientProvider client={client}>
+        <PluginsOverlay onClose={() => {}} onOpenSettings={openSettings} />
+      </QueryClientProvider>,
+    ),
+  );
+  await vi.waitFor(() => expect(searchBox().disabled).toBe(false));
+  await vi.waitFor(() => expect(host.textContent).toContain("Integration settings"));
+  expect(host.textContent).not.toContain("OpenClaw");
+
+  const link = [...host.querySelectorAll("button")].find(
+    (button) => button.textContent === "Integration settings",
+  )!;
+  await act(async () => link.click());
+  expect(openSettings).toHaveBeenCalledTimes(1);
 });
 
 it("opens a sign-in preset with its address filled in and no token to paste", async () => {

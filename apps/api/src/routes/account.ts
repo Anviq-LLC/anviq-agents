@@ -216,6 +216,12 @@ export function accountRoutes(ctx: RouterContext) {
           input.labs === undefined
             ? undefined
             : parseLabs(input.labs).filter((feature) => !deploymentLabs.includes(feature));
+        if (input.hidePluginMarketplace !== undefined) {
+          await deps.prisma.user.update({
+            where: { id: userId },
+            data: { hidePluginMarketplace: input.hidePluginMarketplace },
+          });
+        }
         if (input.timezone !== undefined) {
           // The routines that took the account zone keep their local schedule in the new
           // one, and the other fields commit in the same save. The move's row lock still

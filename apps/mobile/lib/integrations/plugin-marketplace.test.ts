@@ -83,6 +83,14 @@ it("lends a managed app its brand's skills and keeps skill packs out of Integrat
   });
 });
 
+it("leaves out plugin connectors when the marketplace is hidden, keeping skill lending", () => {
+  const vercel = entry({ id: "vercel", name: "vercel", displayName: "Vercel", skillCount: 3 });
+  const sentry = entry({ id: "sentry", displayName: "Sentry" });
+  const { plugins, pluginForApp } = browsablePlugins([vercel, sentry], [app], true);
+  expect(plugins).toEqual([]);
+  expect([...pluginForApp.values()].map((row) => row.id)).toEqual(["vercel"]);
+});
+
 it("counts only the parts an install added", () => {
   const install = (parts?: string[]) =>
     ({

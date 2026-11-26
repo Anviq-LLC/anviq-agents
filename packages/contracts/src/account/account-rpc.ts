@@ -51,6 +51,7 @@ export const accountRpc = {
             locale: AppLocaleSchema.optional(),
             /** Replaces the account's Labs list. */
             labs: z.array(LabFeatureSchema).optional(),
+            hidePluginMarketplace: z.boolean().optional(),
           })
           .refine(
             (input) =>
@@ -58,7 +59,8 @@ export const accountRpc = {
               input.botAvatarSet !== undefined ||
               input.timezone !== undefined ||
               input.locale !== undefined ||
-              input.labs !== undefined,
+              input.labs !== undefined ||
+              input.hidePluginMarketplace !== undefined,
             { message: "Nothing to update" },
           ),
       )

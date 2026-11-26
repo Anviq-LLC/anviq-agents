@@ -181,6 +181,10 @@ export default function SettingsLayout() {
         }
       />
       <Stack.Screen name="integration-setup" options={glassHeaderOptions(t`Server integrations`)} />
+      <Stack.Screen
+        name="integration-settings"
+        options={glassHeaderOptions(t`Integration settings`)}
+      />
     </Stack>
   );
 }

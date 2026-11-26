@@ -49,10 +49,12 @@ export function gitImportParams(url: string): PluginParams {
 /**
  * One row per brand: a plugin for a managed app lends that app its skills instead of being
  * listed again, and skill packs with nothing to connect belong to Skills, not Integrations.
+ * A person who hides the marketplace keeps only the plugins that lend skills to an app.
  */
 export function browsablePlugins(
   entries: PluginMarketplaceEntry[],
   managed: ConnectionCatalogItem[],
+  hideMarketplace = false,
 ): { plugins: PluginMarketplaceEntry[]; pluginForApp: Map<string, PluginMarketplaceEntry> } {
   const pluginForApp = new Map<string, PluginMarketplaceEntry>();
   const plugins: PluginMarketplaceEntry[] = [];
@@ -61,7 +63,7 @@ export function browsablePlugins(
     if (app) {
       if (entry.skillCount && !pluginForApp.has(catalogItemKey(app)))
         pluginForApp.set(catalogItemKey(app), entry);
-    } else if (entry.hasConnector) plugins.push(entry);
+    } else if (entry.hasConnector && !hideMarketplace) plugins.push(entry);
   }
   return { plugins, pluginForApp };
 }

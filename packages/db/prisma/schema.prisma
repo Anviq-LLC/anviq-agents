@@ -45,6 +45,8 @@ model User {
   avatarStyle                 String                       @default("organic")
   /// The icon set this user's bots wear unless one is pinned to another: "organic" or "anviq".
   botAvatarSet                String                       @default("organic")
+  /// Leaves the plugin marketplace's connectors out of Connect apps, so only the connected providers' apps and the person's own sources show.
+  hidePluginMarketplace       Boolean                      @default(false)
   /// IANA timezone such as "Pacific/Auckland". Null until set; bots then get UTC only.
   timezone                    String?
   /// The app language last chosen, such as "es" or "pt-BR". Null until an app reports it;

@@ -46,7 +46,11 @@ vi.mock("../api/api", () => ({
     headers: spaceId ? { "x-anviq-space-id": spaceId } : {},
   }),
   rpc: (proc: string, ...args: unknown[]) =>
-    proc === "marketplace/catalog" ? state.marketplace() : state.rpc(proc, ...args),
+    proc === "marketplace/catalog"
+      ? state.marketplace()
+      : proc === "me"
+        ? Promise.resolve({})
+        : state.rpc(proc, ...args),
 }));
 vi.mock("../api/session", () => ({ currentSessionGeneration: () => 1 }));
 vi.mock("expo-web-browser", () => ({ openAuthSessionAsync: state.authSession }));

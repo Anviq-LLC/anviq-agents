@@ -76,6 +76,9 @@ export function AppOverlays({
           onClose={() => setOverlay(null)}
           onOpenMcp={() => setOverlay({ kind: "mcp" })}
           onOpenTemplates={openTemplates}
+          onOpenSettings={() =>
+            setOverlay({ kind: "settings", section: "integrations", spaceId: null })
+          }
           onOpenMessaging={
             messagingEnabled
               ? () => setOverlay({ kind: "settings", section: "messaging", spaceId: null })

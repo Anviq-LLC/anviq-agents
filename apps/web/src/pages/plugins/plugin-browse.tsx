@@ -33,6 +33,7 @@ export function PluginBrowse({
   tileContext,
   onOpenPlugin,
   onSearchPublic,
+  onOpenSettings,
 }: {
   browse: CatalogBrowse;
   state: PluginConnections;
@@ -40,6 +41,8 @@ export function PluginBrowse({
   onOpenPlugin: (selection: PluginSelection) => void;
   /** Opens the public MCP catalog searched for the query. */
   onSearchPublic: (query: string) => void;
+  /** Opens the integration settings, where marketplace plugins are switched on. */
+  onOpenSettings?: () => void;
 }) {
   const { t } = useLingui();
   const { catalogLoaded, catalog, pluginCatalog, pluginInstalls } = state;
@@ -57,6 +60,7 @@ export function PluginBrowse({
     weakMatches,
     rendered,
     catalogEntries,
+    hideMarketplace,
     catalogsReady,
     plugins,
     categoryLabel,
@@ -150,7 +154,7 @@ export function PluginBrowse({
     const recommended = catalogEntries
       .filter(isRecommendedPlugin)
       .map((entry) => ({ entry, item: managedAppFor(entry, catalog) }))
-      .filter(({ entry, item }) => item || entry.hasConnector)
+      .filter(({ entry, item }) => item || (entry.hasConnector && !hideMarketplace))
       .slice(0, SECTION_SIZE);
     const uncategorized = plugins.filter((entry) => !entry.category);
     const sections: Array<[string, string, PluginMarketplaceEntry[]]> = [
@@ -192,6 +196,13 @@ export function PluginBrowse({
             </div>
           </section>
         ))}
+        {hideMarketplace && onOpenSettings ? (
+          <div className="mt-8 flex justify-center">
+            <Button variant="text" size="sm" onClick={onOpenSettings}>
+              <Trans>Integration settings</Trans>
+            </Button>
+          </div>
+        ) : null}
       </>
     );
   }
