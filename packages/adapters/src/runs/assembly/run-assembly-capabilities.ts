@@ -61,6 +61,7 @@ import { APPROVED_EFFECT_REPLAY_ORDER } from "../lifecycle/run-effects.js";
 import { createRunWorkspaceCheckpoint, failRunBeforeTurn } from "../lifecycle/run-lifecycle.js";
 import {
   BUILTIN_AGENT_TOOL_NAMES,
+  offerCodeTool,
   offersAgentConnectionTools,
   selectBuiltinToolsForRun,
 } from "../tools/run-tool-selection.js";
@@ -766,7 +767,7 @@ export async function selectRunTools(
       ? agentConnectionTools.filter((tool) => !disabledBuiltinTools.has(tool.name))
       : []),
   ];
-  const strategicBuiltins = filterStrategicInitiativeTools(builtins, {
+  const strategicBuiltins = filterStrategicInitiativeTools(offerCodeTool(builtins, discovered), {
     trigger: run.trigger,
     clientNonce: run.clientNonce,
   });

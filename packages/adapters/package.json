@@ -71,6 +71,7 @@
     "novita-sandbox": "2.1.3",
     "pg": "8.23.1",
     "postal-mime": "4.2.0",
+    "quickjs-emscripten": "0.32.0",
     "railway": "3.16.0",
     "sendblue": "3.21.2",
     "sharp": "0.35.5",
