@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PlanUsage } from "../../components/billing/PlanUsage";
 import { computersAreUnavailable } from "../../components/computers/ComputersUnavailableHint";
 import { IntegrationKeysSettings } from "../../components/IntegrationKeysSettings";
+import { MarketplacePluginsSwitch } from "../../components/MarketplacePluginsSwitch";
 import { ApprovalRulesSettings } from "../../components/settings/ApprovalRulesSettings";
 import {
   SETTINGS_CONTENT_WIDTH,
@@ -454,7 +455,12 @@ export function SettingsOverlay({
                   ) : null}
                   {section === "confirmations" ? <ApprovalRulesSettings scope="account" /> : null}
                   {section === "vault" ? <VaultSettings scope="account" /> : null}
-                  {section === "integrations" ? <IntegrationKeysSettings /> : null}
+                  {section === "integrations" ? (
+                    <div className="space-y-6">
+                      <MarketplacePluginsSwitch />
+                      <IntegrationKeysSettings />
+                    </div>
+                  ) : null}
                   {section === "messaging" && messagingEnabled ? <MessagingSettingsPanel /> : null}
                   {section === "wallet" && paymentWalletProvider ? (
                     <PaymentWalletSettingsPanel provider={paymentWalletProvider} />
