@@ -532,6 +532,26 @@ describe("portable plugin parser", () => {
     }
     expect(plugin({ type: "http", url: "https://notcursor.com/mcp" }).mcpServers).toHaveLength(1);
   });
+  it("imports the general endpoint of a per-app server variant", () => {
+    const endpoint = (url: string) =>
+      parsePluginDirectory({
+        files: [
+          { path: ".cursor-plugin/plugin.json", content: JSON.stringify({ name: "crm" }) },
+          {
+            path: "mcp.json",
+            content: JSON.stringify({ mcpServers: { crm: { type: "http", url } } }),
+          },
+        ],
+        resolvedSha: SHA,
+      }).mcpServers[0]?.endpoint;
+    expect(endpoint("https://crm.example.test/mcp/cursor/v2")).toBe("https://crm.example.test/mcp");
+    expect(endpoint("https://crm.example.test/cursor/mcp?x=1")).toBe(
+      "https://crm.example.test/mcp?x=1",
+    );
+    expect(endpoint("https://crm.example.test/mcp/cursory")).toBe(
+      "https://crm.example.test/mcp/cursory",
+    );
+  });
 });
 
 describe("GitHub acquisition", () => {

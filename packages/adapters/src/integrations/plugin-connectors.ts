@@ -618,6 +618,17 @@ function catalogVendorOnly(endpoint: string, headers: Record<string, string>): b
   );
 }
 
+/** A per-app variant such as `/mcp/cursor/v2` registers only that app's clients; without the
+ * app segment the same path is the server's general endpoint. */
+const APP_VARIANT_PATH = /\/(?:cursor|grok|xai)(?:\/v\d+)?(?=\/|$)/i;
+
+function generalEndpoint(endpoint: string): string {
+  const url = new URL(endpoint);
+  if (!APP_VARIANT_PATH.test(url.pathname)) return endpoint;
+  url.pathname = url.pathname.replace(APP_VARIANT_PATH, "") || "/";
+  return url.href;
+}
+
 function collectMcpServers(
   files: Map<string, string>,
   schema: string | undefined,
@@ -706,7 +717,12 @@ function collectMcpServers(
       skipped.push({ kind: "mcp_invalid", name, reason: "Works only in the catalog's own app" });
       continue;
     }
-    out.push({ name, transport, endpoint: config.data.endpoint, headers: config.data.headers });
+    out.push({
+      name,
+      transport,
+      endpoint: generalEndpoint(config.data.endpoint),
+      headers: config.data.headers,
+    });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
