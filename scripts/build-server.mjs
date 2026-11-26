@@ -37,7 +37,7 @@ export function serverBuildOptions(entry, outfile) {
         name: "external-node-modules",
         setup(builder) {
           builder.onResolve({ filter: /^[^./]/ }, async (args) => {
-            if (args.pluginData?.inner) return undefined;
+            if (args.kind === "entry-point" || args.pluginData?.inner) return undefined;
             if (args.path.startsWith("node:") || builtins.has(args.path)) {
               return { path: args.path, external: true };
             }
