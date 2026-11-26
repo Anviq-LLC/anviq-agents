@@ -7,7 +7,7 @@ import type {
   McpSourcePreset,
   PluginMarketplaceEntry,
 } from "@anviq/contracts";
-import { mcpServerConnection, mcpServerNeedsSignIn, SUBMIT_PLUGIN_URL } from "@anviq/contracts";
+import { mcpServerConnection, mcpServerNeedsSignIn } from "@anviq/contracts";
 import type { PluginCategory } from "@anviq/core";
 import {
   buildFeaturedConnectorTiles,
@@ -1274,16 +1274,6 @@ export default function Integrations() {
                   size="compact"
                   variant="text"
                 />
-                {pluginsState !== "loading" ? (
-                  <NativeActionButton
-                    fill={false}
-                    label={t`Submit a plugin`}
-                    onPress={() => void Linking.openURL(SUBMIT_PLUGIN_URL)}
-                    prominence="quiet"
-                    size="compact"
-                    variant="text"
-                  />
-                ) : null}
               </>
             )}
           </>

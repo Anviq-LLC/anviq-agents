@@ -1,5 +1,5 @@
 import type { ConnectionCatalogItem, PluginMarketplaceEntry } from "@anviq/contracts";
-import { CATALOG_SEARCH_QUERY_MAX_LENGTH, SUBMIT_PLUGIN_URL } from "@anviq/contracts";
+import { CATALOG_SEARCH_QUERY_MAX_LENGTH } from "@anviq/contracts";
 import {
   CONNECTION_CATALOG_PAGE_SIZE,
   catalogItemKey,
@@ -9,7 +9,7 @@ import {
 } from "@anviq/core";
 import { Button, Disclosure, SectionHeading, Spinner } from "@anviq/ui-web";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { ArrowUpRight, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { IntegrationKeysSettings } from "../../components/IntegrationKeysSettings";
 import type { PluginSelection } from "../../components/integrations/plugin-marketplace";
 import {
@@ -374,19 +374,6 @@ export function PluginBrowse({
             : null}
         </>
       )}
-      {catalogLoaded && !category ? (
-        <div className="mt-10 flex justify-center">
-          <a
-            href={SUBMIT_PLUGIN_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-body-sm text-muted-foreground hover:text-foreground"
-          >
-            <Trans>Submit a plugin</Trans>
-            <ArrowUpRight size={14} />
-          </a>
-        </div>
-      ) : null}
     </>
   );
 }

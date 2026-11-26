@@ -196,6 +196,8 @@ class ChangedAreasTests(unittest.TestCase):
             data = json.loads(manifest.read_text())
             deps = {**data.get("dependencies", {}), **data.get("devDependencies", {}), **data.get("peerDependencies", {})}
             manifests[data["name"]] = (manifest.parent, [name for name, spec in deps.items() if str(spec).startswith("workspace:")])
+        if "@anviq/www" not in manifests:
+            self.skipTest("this checkout has no marketing site")
         closure, pending = set(), list(manifests["@anviq/www"][1])
         while pending:
             name = pending.pop()
