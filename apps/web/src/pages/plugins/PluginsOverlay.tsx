@@ -28,6 +28,7 @@ import {
   Spinner,
 } from "@anviq/ui-web";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, LayoutTemplate, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { IntegrationSetup } from "../../components/integrations/IntegrationSetup";
@@ -39,6 +40,7 @@ import { PluginDetail, pluginSelection } from "../../components/integrations/plu
 import { reachesOtherSpaces, useOwnSpaces } from "../../components/integrations/space-availability";
 import type { connectedAppMarks } from "../../lib/integrations/connected-apps";
 import { connectMcpOauth } from "../../lib/integrations/mcp-connect";
+import { useSpaceQueries } from "../../lib/query/query";
 import { rpc } from "../../lib/query/rpc";
 import { errorCode, errorText } from "../../lib/query/user-error";
 import { AddMenu } from "./add-menu";
@@ -64,6 +66,7 @@ export function PluginsOverlay({
   onOpenMcp,
   onOpenTemplates,
   onOpenMessaging,
+  onOpenSettings,
   activeBotId,
 }: {
   onConnectedAppsChange?: (apps: ReturnType<typeof connectedAppMarks>) => void;
@@ -71,6 +74,7 @@ export function PluginsOverlay({
   onOpenMcp?: () => void;
   onOpenTemplates?: () => void;
   onOpenMessaging?: () => void;
+  onOpenSettings?: () => void;
   activeBotId?: string;
 }) {
   const { t } = useLingui();
@@ -116,11 +120,13 @@ export function PluginsOverlay({
     itemConnected,
     connect,
   } = state;
+  const me = useQuery(useSpaceQueries().me.queryOptions()).data;
   const browse = useCatalogBrowse({
     catalog,
     catalogLoaded,
     loadError,
     pluginCatalog: state.pluginCatalog,
+    hideMarketplace: me?.hidePluginMarketplace ?? false,
   });
   const {
     query,
@@ -635,6 +641,7 @@ export function PluginsOverlay({
               state={state}
               tileContext={tileContext}
               onOpenPlugin={openPlugin}
+              onOpenSettings={onOpenSettings}
               onSearchPublic={(publicQuery) => {
                 setPublicCatalogQuery(publicQuery);
                 openAddView("browseMcp");

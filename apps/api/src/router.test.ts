@@ -344,6 +344,26 @@ describe("account preferences", () => {
     });
   });
 
+  it("saves whether marketplace plugins are hidden and reports it back", async () => {
+    const { update, actor, handler } = preferencesDeps("organic");
+
+    const response = await handle(
+      handler,
+      new Request("http://127.0.0.1/rpc/preferences/update", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ json: { hidePluginMarketplace: true } }),
+      }),
+      { prefix: "/rpc", context: { actor } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { hidePluginMarketplace: true },
+    });
+  });
+
   it("saves the bot style and restyles only bots not pinned to another set", async () => {
     const { update, botFindMany, actor, handler } = preferencesDeps("organic");
 

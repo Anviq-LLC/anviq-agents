@@ -17,6 +17,7 @@ const settingsScreens = new Set([
   "change-password",
   "computers",
   "general",
+  "integration-settings",
   "integration-setup",
   "integrations",
   "labs",

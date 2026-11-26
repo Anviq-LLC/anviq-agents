@@ -49,6 +49,8 @@ export const MeSchema = z.object({
   avatarStyle: AvatarStyleSchema,
   /** The icon set new and unpinned bots wear. Absent from servers that predate it. */
   botAvatarSet: BotAvatarSetSchema.optional(),
+  /** Whether marketplace plugin connectors stay out of Connect apps. Absent from older servers. */
+  hidePluginMarketplace: z.boolean().optional(),
   /**
    * The user's IANA timezone, or null when unset (bots then see UTC only).
    * Absent from servers that predate it.

@@ -60,6 +60,7 @@ export type MobileMe = Pick<
   | "labs"
   | "labsAvailable"
   | "botAvatarSet"
+  | "hidePluginMarketplace"
   | "licensee"
 >;
 export type MobileModel = ModelCatalogEntry;
