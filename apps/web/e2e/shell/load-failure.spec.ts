@@ -34,9 +34,7 @@ test("a failed integrations load offers Retry instead of an empty catalog", asyn
   const retry = page.getByRole("button", { name: "Retry", exact: true });
   await expect(retry).toBeVisible();
   await expect(page.getByText("Could not reach the server", { exact: true })).toBeVisible();
-  await expect(
-    page.getByText("Configure a plugin catalog on the server to connect apps.", { exact: true }),
-  ).toHaveCount(0);
+  await expect(page.getByText("Provider keys", { exact: true })).toHaveCount(0);
   await captureScreenshot(page, testInfo, "integrations-load-failed");
 
   failCatalog = false;
@@ -103,12 +101,10 @@ for (const result of ["empty", "plugin", "unavailable"] as const) {
     });
     await page.getByRole("button", { name: "Connect apps", exact: true }).click();
     const loading = page.getByLabel("Loading plugins…", { exact: true });
-    const configure = page.getByText("Configure a plugin catalog on the server to connect apps.", {
-      exact: true,
-    });
+    const providerKeys = page.getByText("Provider keys", { exact: true });
     try {
       await expect(loading).toBeVisible();
-      await expect(configure).toHaveCount(0);
+      await expect(providerKeys).toHaveCount(0);
       await page.getByPlaceholder("Search apps", { exact: true }).fill("missing");
       await expect(page.getByText("No apps match your search.", { exact: true })).toHaveCount(0);
       await page.getByPlaceholder("Search apps", { exact: true }).clear();
@@ -119,10 +115,13 @@ for (const result of ["empty", "plugin", "unavailable"] as const) {
     }
     await expect(loading).toHaveCount(0);
     if (result === "empty") {
-      await expect(configure).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Browse MCP servers", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByText("Provider keys", { exact: true })).toBeVisible();
       await captureScreenshot(page, testInfo, "integrations-catalog-empty");
     } else {
-      await expect(configure).toHaveCount(0);
+      await expect(page.getByText("Provider keys", { exact: true })).toHaveCount(0);
       if (result === "plugin") {
         await expect(page.getByText("Demo app", { exact: true })).toBeVisible();
       } else {
