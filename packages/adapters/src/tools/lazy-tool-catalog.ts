@@ -75,6 +75,11 @@ export function isLazyCatalogControlRoute(route: ConnectorRoute | undefined): bo
   );
 }
 
+/** The wrapper that runs a catalog tool by id. */
+export function isCatalogExecuteTool(tool: ConnectorTool): boolean {
+  return !tool.route?.resourceId && tool.route?.toolName === CATALOG_EXECUTE;
+}
+
 export function catalogEntries(tools: ConnectorTool[]): CatalogEntry[] {
   return tools
     .map((tool) => ({ id: catalogEntryId(tool), tool, group: catalogGroupOf(tool) }))

@@ -14,7 +14,8 @@ Open **Settings → Approvals** and pick a **Mode**:
   bot has read a page, an email or another bot's message, the model also checks memory and skill
   saves, routines and setting changes, and it never treats that text as your request.
 - **Never ask**: every action runs without waiting. Only Block rules and your spending limit stop
-  one.
+  one, and accepting another owner's bot connection still asks when outside content could have
+  requested it.
 
 The mode works the same in a routine and in a chat app you linked as in the app itself.
 
@@ -47,6 +48,15 @@ mode. **Preview** shows what would happen for a given tool before you change any
 To stop one bot from ever using a tool, open the bot's settings, expand **Advanced**, and use
 **Disable a tool** under **Tools**.
 
+## Scripts
+
+With many connected apps, a bot can run a short script (`run_code`) that reads from them and
+returns only what it needs, which keeps long results out of the conversation. A script can only
+read. Each read passes the same checks as the bot making that call itself: Block and ask rules
+apply, and once outside content is in the run, only apps the run already used are read. Anything
+that changes data is refused inside the script, and the bot makes that call directly, with its
+usual card. Disable `run_code` in a bot's tool settings to turn scripts off for it.
+
 ## What always asks
 
 In **Auto** and **Ask**, these always show a card, and **Always allow** doesn't skip it:
@@ -57,7 +67,7 @@ In **Auto** and **Ask**, these always show a card, and **Always allow** doesn't 
 - The first use of your own computer in a space, and of each app on it.
 
 **Never ask** runs all of them. The one exception is accepting another owner's bot connection, which
-it refuses when someone else started the run or outside content entered it.
+it still asks you about when someone else started the run or outside content entered it.
 
 ## Spending limit
 

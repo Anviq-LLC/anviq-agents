@@ -37,7 +37,7 @@ export function serverBuildOptions(entry, outfile) {
         name: "external-node-modules",
         setup(builder) {
           builder.onResolve({ filter: /^[^./]/ }, async (args) => {
-            if (args.pluginData?.inner) return undefined;
+            if (args.kind === "entry-point" || args.pluginData?.inner) return undefined;
             if (args.path.startsWith("node:") || builtins.has(args.path)) {
               return { path: args.path, external: true };
             }
@@ -61,7 +61,10 @@ export function serverBuildOptions(entry, outfile) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   for (const entry of process.argv.slice(2)) {
-    const outfile = path.resolve("dist", path.relative("src", entry).replace(/\.ts$/, ".js"));
+    // An entry outside this app (a worker thread script) lands beside the app's own entry.
+    const relative = path.relative("src", entry);
+    const name = relative.startsWith("..") ? path.basename(entry) : relative;
+    const outfile = path.resolve("dist", name.replace(/\.ts$/, ".js"));
     await build(serverBuildOptions(entry, outfile));
   }
 }

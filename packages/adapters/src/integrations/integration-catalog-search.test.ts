@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   IntegrationCatalogUnavailableError,
   searchIntegrationCatalog,
-} from "./integration-catalog.js";
+} from "./integration-catalog-search.js";
 
 describe("searchIntegrationCatalog", () => {
   it("normalizes an integrations.sh-compatible feed and keeps unsupported surfaces visible", async () => {

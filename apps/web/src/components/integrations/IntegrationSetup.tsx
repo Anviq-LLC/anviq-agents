@@ -1,6 +1,7 @@
+import { useTimeout } from "@anviq/chat-ui/hooks";
 import type { IntegrationCatalogResult } from "@anviq/contracts";
 import { signInMcpServers } from "@anviq/core";
-import { Button, Disclosure, Input } from "@anviq/ui-web";
+import { Button, Input } from "@anviq/ui-web";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useRef, useState } from "react";
 import { connectMcpEndpoint } from "../../lib/integrations/mcp-connect";
@@ -8,6 +9,14 @@ import { rpc } from "../../lib/query/rpc";
 import type { ErrorDetails } from "../../lib/query/user-error";
 import { errorDetails } from "../../lib/query/user-error";
 import { ErrorNotice } from "../ErrorNotice";
+
+const SEARCH_DELAY_MS = 400;
+
+/** A pasted server address: searching it would find nothing, so it is offered as the server. */
+function pastedUrl(text: string): string | null {
+  const value = text.trim();
+  return /^https?:\/\//i.test(value) && URL.canParse(value) ? value : null;
+}
 
 /** Personal MCP connections never configure deployment-wide provider credentials. */
 export function IntegrationSetup({
@@ -21,7 +30,6 @@ export function IntegrationSetup({
   initialQuery?: string;
 }) {
   const { t } = useLingui();
-  const [endpoint, setEndpoint] = useState("");
   const [query, setQuery] = useState(initialQuery ?? "");
   const [results, setResults] = useState<IntegrationCatalogResult[]>([]);
   const [searched, setSearched] = useState(false);
@@ -29,6 +37,8 @@ export function IntegrationSetup({
   const [error, setError] = useState<ErrorDetails | null>(null);
   const [connected, setConnected] = useState<string[]>([]);
   const remoteResults = signInMcpServers(results);
+  const url = pastedUrl(query);
+  const lastSearched = useRef<string | null>(null);
   async function run(action: () => Promise<void>) {
     setBusy(true);
     setError(null);
@@ -41,15 +51,25 @@ export function IntegrationSetup({
     }
   }
 
-  function search(text: string) {
-    void run(async () => {
+  // Only the latest search may show its answer, and searching never locks the Connect buttons.
+  const latestSearch = useRef(0);
+  async function search(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || trimmed === lastSearched.current) return;
+    lastSearched.current = trimmed;
+    const id = ++latestSearch.current;
+    setError(null);
+    try {
       const response = await rpc.capabilities.catalogSearch({
-        query: text,
+        query: trimmed,
         usePublicCatalog: true,
       });
+      if (id !== latestSearch.current) return;
       setResults(response.results);
       setSearched(true);
-    });
+    } catch (err) {
+      if (id === latestSearch.current) setError(errorDetails(err, t`Could not connect`));
+    }
   }
 
   // Ref, not state: a development remount must not send the search twice.
@@ -57,14 +77,31 @@ export function IntegrationSetup({
   useEffect(() => {
     if (searchedInitial.current || !initialQuery?.trim()) return;
     searchedInitial.current = true;
-    search(initialQuery);
+    void search(initialQuery);
   }, []);
 
-  async function connect(name: string, url: string) {
+  useTimeout(() => void search(query), query.trim() && !url ? SEARCH_DELAY_MS : null, query);
+
+  async function connect(name: string, endpoint: string) {
     await run(async () => {
-      const result = await connectMcpEndpoint({ name, endpoint: url, botId });
-      if (result !== "cancelled") setConnected((current) => [...current, url]);
+      const result = await connectMcpEndpoint({ name, endpoint, botId });
+      if (result !== "cancelled") setConnected((current) => [...current, endpoint]);
     });
+  }
+
+  function row(name: string, endpoint: string) {
+    return (
+      <div key={endpoint} className="flex items-center justify-between gap-3">
+        <span className="min-w-0 truncate">{name}</span>
+        <Button
+          variant="outline"
+          disabled={busy || connected.includes(endpoint)}
+          onClick={() => void connect(name, endpoint)}
+        >
+          {connected.includes(endpoint) ? t`Connected` : t`Connect`}
+        </Button>
+      </div>
+    );
   }
 
   return (
@@ -73,58 +110,25 @@ export function IntegrationSetup({
         <Trans>Add MCP server</Trans>
       </h1>
       <form
-        className="flex gap-2"
         onSubmit={(event) => {
           event.preventDefault();
-          search(query);
+          void search(query);
         }}
       >
         <Input
           aria-label={t`Search apps`}
-          placeholder={t`Search apps`}
+          placeholder={t`Search apps or paste a server URL`}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <Button type="submit" disabled={busy || !query.trim()}>
-          <Trans>Search integrations.sh</Trans>
-        </Button>
       </form>
-      {remoteResults.map((result) => (
-        <div key={result.endpoint} className="flex items-center justify-between gap-3">
-          <span className="min-w-0 truncate">{result.name}</span>
-          <Button
-            variant="outline"
-            disabled={busy || connected.includes(result.endpoint)}
-            onClick={() => void connect(result.name, result.endpoint)}
-          >
-            {connected.includes(result.endpoint) ? t`Connected` : t`Connect`}
-          </Button>
-        </div>
-      ))}
-      {searched && !remoteResults.length ? (
+      {url ? row(new URL(url).hostname, url) : null}
+      {url ? null : remoteResults.map((result) => row(result.name, result.endpoint))}
+      {!url && searched && !remoteResults.length ? (
         <p className="text-body text-muted-foreground">
           <Trans>No remote MCP servers found</Trans>
         </p>
       ) : null}
-      <Disclosure
-        className="text-body text-muted-foreground"
-        summary={<Trans>Add server URL</Trans>}
-      >
-        <div className="mt-3 space-y-3">
-          <Input
-            aria-label={t`Server URL`}
-            value={endpoint}
-            onChange={(event) => setEndpoint(event.target.value)}
-            placeholder="https://example.com/mcp"
-          />
-          <Button
-            disabled={busy || !endpoint.trim()}
-            onClick={() => void connect("MCP server", endpoint.trim())}
-          >
-            <Trans>Connect</Trans>
-          </Button>
-        </div>
-      </Disclosure>
       {error ? <ErrorNotice error={error} /> : null}
       {onDone ? (
         <Button disabled={busy} onClick={onDone}>

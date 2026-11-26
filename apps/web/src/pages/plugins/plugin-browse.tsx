@@ -7,9 +7,10 @@ import {
   managedAppFor,
   OTHER_PLUGINS,
 } from "@anviq/core";
-import { Button, SectionHeading, Spinner } from "@anviq/ui-web";
+import { Button, Disclosure, SectionHeading, Spinner } from "@anviq/ui-web";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { ArrowUpRight, Search } from "lucide-react";
+import { IntegrationKeysSettings } from "../../components/IntegrationKeysSettings";
 import type { PluginSelection } from "../../components/integrations/plugin-marketplace";
 import {
   PluginRow,
@@ -235,9 +236,26 @@ export function PluginBrowse({
         <div className="mb-6" data-testid="featured-connectors">
           {catalog.length === 0 ? (
             !catalogsReady || plugins.length ? null : (
-              <p className="text-body leading-6 text-muted-foreground/80">
-                <Trans>Configure a plugin catalog on the server to connect apps.</Trans>
-              </p>
+              <div className="space-y-4">
+                <div className={ROW_SHELL + " " + ROW_HOVER}>
+                  <button type="button" className={ROW_BUTTON} onClick={() => onSearchPublic("")}>
+                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-border/60 bg-favicon-plate text-muted-foreground">
+                      <Search className="size-4" />
+                    </div>
+                    <span className="min-w-0 flex-1 truncate text-body-lg font-medium text-foreground">
+                      <Trans>Browse MCP servers</Trans>
+                    </span>
+                  </button>
+                </div>
+                <Disclosure
+                  className="text-body text-muted-foreground"
+                  summary={<Trans>Provider keys</Trans>}
+                >
+                  <div className="mt-3">
+                    <IntegrationKeysSettings />
+                  </div>
+                </Disclosure>
+              </div>
             )
           ) : (
             <div className="grid grid-cols-2 gap-2">
@@ -348,7 +366,8 @@ export function PluginBrowse({
               </Button>
             </div>
           ) : null}
-          {query.trim().length >= 2 &&
+          {catalog.length === 0 &&
+          query.trim().length >= 2 &&
           query.trim().length <= CATALOG_SEARCH_QUERY_MAX_LENGTH &&
           !category
             ? renderPublicCatalogRow(query.trim())

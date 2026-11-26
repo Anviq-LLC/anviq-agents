@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExecutorDeps } from "../runs/executor/executor-deps.js";
 import {
   addMcpServerFromTool,
   buildMcpCredentialBlob,
+  connectMcpByName,
   deriveMcpSlug,
   needsOAuthProbe,
   parseMcpServerToolArgs,
@@ -113,6 +114,76 @@ describe("addMcpServerFromTool", () => {
       "exec-1",
     );
     expect(result).toEqual({ error: "Put token in a header instead of the server URL" });
+  });
+});
+
+describe("connectMcpByName", () => {
+  const run = { id: "run-1", spaceId: "space-1", userId: "user-1", threadId: "t-1", botId: "b-1" };
+  const server = (name: string, domain: string) => ({
+    domain,
+    name,
+    surfaces: [
+      { kind: "mcp", slug: domain, url: `https://mcp.${domain}/mcp`, auth: { kind: "oauth" } },
+    ],
+  });
+  const prismaWith = (existing: { id: string } | null = null, assigned = 0) => ({
+    mcpServer: { findFirst: vi.fn(async () => existing) },
+    botMcpServer: { count: vi.fn(async () => assigned) },
+  });
+  const lookup = (app: string, deps: Partial<ExecutorDeps> = {}) =>
+    connectMcpByName(
+      { prisma: prismaWith(), ...deps } as unknown as ExecutorDeps,
+      run,
+      "b-1",
+      app,
+      "exec-1",
+      new AbortController().signal,
+    );
+  const answerWith = (results: unknown[]) =>
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ results })),
+    );
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("says nothing when the catalog has no sign-in server for the app", async () => {
+    answerWith([]);
+    expect(await lookup("Nothing")).toBeUndefined();
+  });
+
+  it("says nothing when the catalog cannot be reached", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("offline");
+      }),
+    );
+    expect(await lookup("Notion")).toBeUndefined();
+  });
+
+  it("asks which one when several servers match and none is named exactly", async () => {
+    answerWith([server("Notion Docs", "docs.example"), server("Notion Tasks", "tasks.example")]);
+    expect(await lookup("Notion")).toEqual({
+      error: "Several MCP servers match: Notion Docs, Notion Tasks. Ask the user which one.",
+    });
+  });
+
+  it("registers the one server named exactly, so the user approves it", async () => {
+    answerWith([server("Notion", "notion.example"), server("Notion Tasks", "tasks.example")]);
+    const result = await lookup("notion", {
+      secretHttp: { resolveHostname: async () => [{ address: "93.184.216.34", family: 4 }] },
+    } as Partial<ExecutorDeps>);
+    expect(result).toEqual({ error: "Secret storage is not available in this deployment." });
+  });
+
+  it("finds a server this user already added instead of adding it again", async () => {
+    answerWith([server("Notion", "notion.example")]);
+    const added = (assigned: number) =>
+      lookup("Notion", {
+        prisma: prismaWith({ id: "srv-1" }, assigned),
+      } as unknown as Partial<ExecutorDeps>);
+    expect(await added(1)).toMatchObject({ status: "connected" });
+    expect(await added(0)).toMatchObject({ status: "pending" });
   });
 });
 
